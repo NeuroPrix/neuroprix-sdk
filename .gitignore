@@ -1,0 +1,19 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.DS_Store
+
+# What the trainer writes when run by hand
+*.pth
+racer_weights.*
+experiment.json
+
+# A runner's link to an account (a token): never commit
+runner.json
+.env
+.env.*

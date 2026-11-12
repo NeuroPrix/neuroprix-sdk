@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "neuroprix"
+version = "0.2.0"
+description = "NeuroPrix SDK: train your NeuroPrix racing drivers on your own computer. The race engine, the default trainer and the runner."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.26", "torch>=2.2"]
+keywords = ["neuroprix", "reinforcement-learning", "racing", "ppo", "neural-network", "game"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Games/Entertainment :: Simulation",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+# Fill these in with the public repository's address before the first upload to PyPI:
+# [project.urls]
+# Homepage = "https://github.com/<owner>/neuroprix-sdk"
+# Documentation = "https://github.com/<owner>/neuroprix-sdk/blob/main/docs/guide.md"
+# Changelog = "https://github.com/<owner>/neuroprix-sdk/blob/main/CHANGELOG.md"
+
+[project.scripts]
+neuroprix-runner = "neuroprix.runner:run"
+neuroprix-train = "neuroprix.train:main"
+
+[tool.setuptools]
+packages = ["neuroprix"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
