@@ -1,7 +1,7 @@
 """NeuroPrix Runner: trains your drivers on this computer (or a machine you rent), for your NeuroPrix account.
 
-    neuroprix-runner --server https://your-neuroprix-server                       (the SDK: pip install neuroprix)
-    python runner/neuroprix_runner.py --server https://your-neuroprix-server       (from a NeuroPrix checkout)
+    neuroprix-runner --server https://neuroprix.com/api                           (the SDK: pip install neuroprix)
+    python runner/neuroprix_runner.py --server https://neuroprix.com/api           (from a NeuroPrix checkout)
     neuroprix-runner --server ... --trainer "python my_trainer.py"                 (your own trainer)
 
 The first time, it shows a code: in the Garage, open a driver's Train tab, choose "Add a computer" and type it in.
@@ -229,7 +229,7 @@ def pair(server: str, name: str, info: dict) -> dict:
             continue
         bar = "=" * 56
         print(f"\n{bar}\n  Link this runner to your NeuroPrix account:\n\n"
-              f"  1. Open the Garage at {server}\n  2. In a driver's Train tab, choose \"Add a computer\"\n"
+              f"  1. Open the Garage at {server.removesuffix('/api')}\n  2. In a driver's Train tab, choose \"Add a computer\"\n"
               f"  3. Type this code:   {clean(p['code'])[:20]}\n\n  (valid for {int(p['expires_in']) // 60} minutes)\n{bar}\n", flush=True)
         while True:
             time.sleep(2)
@@ -409,7 +409,7 @@ def main() -> None:
     if hasattr(signal, "SIGTERM"):
         signal.signal(signal.SIGTERM, _quit)
     ap = argparse.ArgumentParser(description="NeuroPrix Runner: train your drivers on this machine.")
-    ap.add_argument("--server", default=os.environ.get("NEUROPRIX_SERVER"), help="your NeuroPrix server, e.g. https://neuroprix.example (remembered)")
+    ap.add_argument("--server", default=os.environ.get("NEUROPRIX_SERVER"), help="the NeuroPrix server, e.g. https://neuroprix.com/api (remembered)")
     ap.add_argument("--name", default=None, help="what to call this runner in the Garage (default: this computer's name)")
     ap.add_argument("--workers", type=int, default=max(1, min(12, (os.cpu_count() or 2) - 2)),
                     help="games to run in parallel while training (default: CPU cores minus 2)")
@@ -427,7 +427,7 @@ def main() -> None:
     cfg = {} if args.relink else load_config()
     server = (args.server or cfg.get("server") or "http://localhost:8000").rstrip("/")
     if not re.match(r"^https?://[^/\s]+", server):
-        ap.error(f"--server must be a web address starting with https:// (or http://), e.g. https://neuroprix.example; got {server!r}")
+        ap.error(f"--server must be a web address starting with https:// (or http://), e.g. https://neuroprix.com/api; got {server!r}")
     host = urllib.parse.urlsplit(server).hostname or ""
     if server.startswith("http://") and host not in ("localhost", "127.0.0.1", "::1") and not args.allow_http:
         ap.error(f"{server} isn't encrypted (http://): use https://, so the runner's token can't be read on the way "

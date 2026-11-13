@@ -3,7 +3,7 @@ brain whenever it drives further). Not a strong learner, but it shows the whole 
 
   1. read --session session.json   2. write the best brain to brain_out   3. (optionally) print progress events
 
-    neuroprix-runner --server https://your-neuroprix-server --trainer "python minimal_trainer.py"
+    neuroprix-runner --server https://neuroprix.com/api --trainer "python minimal_trainer.py"
 """
 import argparse
 import json

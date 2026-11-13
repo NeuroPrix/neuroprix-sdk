@@ -17,7 +17,7 @@ You need Python 3.10 or newer.
 ```bash
 python3 -m venv ~/neuroprix                     # a separate environment for it
 ~/neuroprix/bin/pip install neuroprix           # the SDK and PyTorch (about 1 GB)
-~/neuroprix/bin/neuroprix-runner --server https://your-neuroprix-site
+~/neuroprix/bin/neuroprix-runner --server https://neuroprix.com/api
 ```
 
 (On Windows: `py -m venv $HOME\neuroprix`, then `$HOME\neuroprix\Scripts\pip` and `...\Scripts\neuroprix-runner`.)
@@ -34,7 +34,7 @@ With Docker (good for a rented machine):
 
 ```bash
 docker build -t neuroprix-runner .
-docker run -it -v neuroprix:/home/runner/.neuroprix neuroprix-runner --server https://your-neuroprix-site
+docker run -it -v neuroprix:/home/runner/.neuroprix neuroprix-runner --server https://neuroprix.com/api
 ```
 
 ## What's in it

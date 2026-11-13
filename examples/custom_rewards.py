@@ -1,7 +1,7 @@
 """NeuroPrix's own trainer, with your own reward: here, a bonus for braking when the car is too fast for the corners
 ahead, on top of the usual rewards.
 
-    neuroprix-runner --server https://your-neuroprix-server --trainer "python custom_rewards.py"
+    neuroprix-runner --server https://neuroprix.com/api --trainer "python custom_rewards.py"
 
 How it works: neuroprix.train scores each decision with reward_for(prev_state, state, weights, steps_left, gamma).
 Replacing it here (at the top of the file, so the game workers, which start by loading this file, use it too) changes

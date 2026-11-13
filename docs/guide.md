@@ -57,11 +57,11 @@ It prints something like `neuroprix-runner 0.2.0 (engine 2026.11.3)`.
 
 ### 2. Start the runner and link it to your account
 
-The runner is the program that trains on your computer. Start it with your NeuroPrix site's address (the address in
-your browser's address bar when you play; in the Garage, **Add a computer** shows the exact command to copy):
+The runner is the program that trains on your computer. Start it with your NeuroPrix server's address: the site's
+address followed by `/api` (in the Garage, **Add a computer** shows the exact command to copy):
 
 ```bash
-~/neuroprix/bin/neuroprix-runner --server https://your-neuroprix-site
+~/neuroprix/bin/neuroprix-runner --server https://neuroprix.com/api
 ```
 
 The first time, it shows a code:
@@ -70,7 +70,7 @@ The first time, it shows a code:
 ========================================================
   Link this runner to your NeuroPrix account:
 
-  1. Open the Garage at https://your-neuroprix-site
+  1. Open the Garage at https://neuroprix.com
   2. In a driver's Train tab, choose "Add a computer"
   3. Type this code:   K7QF-2MXP
 
@@ -173,7 +173,7 @@ neuroprix-runner [--server URL] [--name NAME] [--workers N] [--trainer COMMAND] 
 
 | Option | What it does | Default |
 |---|---|---|
-| `--server URL` | Your NeuroPrix site's address. Remembered after the first time, so later you can leave it out. | The remembered one |
+| `--server URL` | The NeuroPrix server: the site's address followed by `/api` (`https://neuroprix.com/api`). Remembered after the first time, so later you can leave it out. | The remembered one |
 | `--name NAME` | What this computer is called in the Garage's **Trains on** list. Only used when linking. | This computer's name |
 | `--workers N` | How many practice games to run at the same time. More is faster but uses more of your computer. | CPU cores minus 2 (at most 12) |
 | `--trainer COMMAND` | Train with your own trainer instead of NeuroPrix's, e.g. `--trainer "python my_trainer.py"`. See [Write your own trainer](#write-your-own-trainer). | NeuroPrix's PPO trainer |
@@ -187,7 +187,7 @@ neuroprix-runner [--server URL] [--name NAME] [--workers N] [--trainer COMMAND] 
 ### What the runner prints
 
 ```
-22:41:07 NeuroPrix Runner 0.2.0: "my-pc" on https://your-neuroprix-site, 6 games in parallel, trainer: NeuroPrix PPO. Waiting for training sessions (Ctrl+C to quit).
+22:41:07 NeuroPrix Runner 0.2.0: "my-pc" on https://neuroprix.com/api, 6 games in parallel, trainer: NeuroPrix PPO. Waiting for training sessions (Ctrl+C to quit).
 22:43:15 training Jango (N2), session a6480de05a
 22:44:02   update 25
 22:44:51   update 50
@@ -239,7 +239,7 @@ for scripts, services and containers:
 
 | Variable | Same as | Example |
 |---|---|---|
-| `NEUROPRIX_SERVER` | `--server` | `https://your-neuroprix-site` |
+| `NEUROPRIX_SERVER` | `--server` | `https://neuroprix.com/api` |
 | `NEUROPRIX_TRAINER` | `--trainer` | `python /work/my_trainer.py` |
 | `NEUROPRIX_RUNNER_CONFIG` | Where the link is kept | `/data/runner.json` |
 | `NEUROPRIX_TRAIN_WORKERS` | `neuroprix-train --workers` (when training without the runner) | `4` |
@@ -305,7 +305,7 @@ Any recent distribution. Install the CPU-only PyTorch first (see the Quick start
 
 Any machine with several CPU cores works; a compute-optimised one with 8–32 cores is a good choice. GPU machines cost
 more and don't train faster. Rent it, install the SDK (or use Docker, below), start the runner with
-`--server https://your-neuroprix-site`, and type the code it shows into the Garage. To keep it running after you log
+`--server https://neuroprix.com/api`, and type the code it shows into the Garage. To keep it running after you log
 out, use `tmux` or `screen`, or Docker with `--restart unless-stopped`.
 
 ### Docker
@@ -315,7 +315,7 @@ The repository has a `Dockerfile` with the CPU-only PyTorch:
 ```bash
 git clone <this repository> neuroprix-sdk && cd neuroprix-sdk
 docker build -t neuroprix-runner .
-docker run -it -v neuroprix:/home/runner/.neuroprix neuroprix-runner --server https://your-neuroprix-site
+docker run -it -v neuroprix:/home/runner/.neuroprix neuroprix-runner --server https://neuroprix.com/api
 ```
 
 The volume (`-v neuroprix:/home/runner/.neuroprix`) keeps the link, so the container doesn't ask for a new code each time it
@@ -441,10 +441,10 @@ Use the `https://` address.
 The runner doesn't follow redirects (so its token only ever goes to the address you gave). Use the address it names.
 
 **`--server must be a web address starting with https://`**
-Include `https://`: `--server https://your-neuroprix-site`, not `--server your-neuroprix-site`.
+Include `https://`: `--server https://neuroprix.com/api`, not `--server neuroprix.com/api`.
 
 **`can't get a code from https://... ; retrying in 10 s`**
-The runner can't reach the server. Check the address (open it in your browser), your internet connection, and that
+The runner can't reach the server. Check the address (it ends in `/api`: `https://neuroprix.com/api`), your internet connection, and that
 a firewall or proxy isn't blocking Python. It keeps trying, so it links as soon as the server is reachable.
 
 **The code expired**
