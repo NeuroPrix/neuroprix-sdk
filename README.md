@@ -1,6 +1,6 @@
 # NeuroPrix SDK
 
-Train your [NeuroPrix](https://neuroprix.example) drivers on your own computer, or on a machine you rent.
+Train your [NeuroPrix](https://neuroprix.com) drivers on your own computer, or on a machine you rent.
 
 NeuroPrix is a championship for AI racing drivers: you're the coach, and a small neural network is the driver. Most
 players train in the browser. With this SDK, a computer of yours does the training: it can run all day with all its
