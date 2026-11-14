@@ -325,6 +325,10 @@ def run_job(api: Api, job: dict, workers: int, trainer: list[str]) -> None:
                     if item is None:
                         finished_reading = True
                         break
+                    if item.startswith('{"event": "net"'):   # brain snapshots: the server only needs the latest two
+                        nets = [i for i, ln in enumerate(pending) if ln.startswith('{"event": "net"')]
+                        if len(nets) >= 2:
+                            del pending[nets[0]]
                     pending.append(item)
                     if item.startswith("{"):
                         try:

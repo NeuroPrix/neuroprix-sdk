@@ -771,7 +771,19 @@ def main() -> None:
         preview["spec"] = spec
         n_checks[0] += 1
         return score, res, path, preview
+    last_net = [0.0]
+
+    def send_net(update: int) -> None:
+        """The brain's weights now (rounded), for the Garage's live brain view: at the start, every few seconds, at checks."""
+        if not args.progress_json:
+            return
+        last_net[0] = time.time()
+        rb = policy.export()
+        layer = lambda fc: {"weight": [[round(v, 4) for v in row] for row in fc.weight.tolist()],
+                            "bias": [round(v, 4) for v in fc.bias.tolist()]}
+        print(json.dumps({"event": "net", "update": update, "fc1": layer(rb.fc1), "fc2": layer(rb.fc2)}), flush=True)
     try:
+        send_net(0)
         if args.resume:   # a session that only makes things worse keeps the starting weights
             score, res, path, preview = run_check(policy.export())
             best, best_key = score, (round(score - args.start_margin, 3), -sum(r["time"] for r in res))
@@ -828,7 +840,10 @@ def main() -> None:
                 f"| car touches {contacts / nt:4.2f} | damage {damage / nt:4.2f} | wall frames {walls / nt:5.1f} | clean passes {passes / nt:4.2f} | {time.time() - t0:5.0f}s",
                 event="update", update=update, avg_return=round(ret_sum / nt, 2), avg_distance=round(n / nt * 4 * 4, 1),
                 car_contacts=round(contacts / nt, 3), damage=round(damage / nt, 3), wall_frames=round(walls / nt, 1), passes=round(passes / nt, 3), elapsed=round(time.time() - t0, 1))
-            if update % args.eval_every == 0 or update == args.updates:
+            checking = update % args.eval_every == 0 or update == args.updates
+            if checking or time.time() - last_net[0] >= 4.0:
+                send_net(update)
+            if checking:
                 score, res, path, preview = run_check(policy.export())
                 key = (round(score, 3), -sum(r["time"] for r in res))
                 saved = key > best_key

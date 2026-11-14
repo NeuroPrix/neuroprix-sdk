@@ -12,6 +12,8 @@ Engine 2026.11.3.
 - **The runner** (`neuroprix-runner`): links a computer to your account with a code, trains the sessions you start
   in the Garage, sends back progress, replays and brains, and handles Stop in the Garage, Ctrl+C and `docker stop`.
   Carries on training through short connection drops and sends the progress when the server is back.
+- **A live picture of the brain** in the Train tab: the trainer sends its weights every few seconds (the `net`
+  event, [docs/progress-events.md](docs/progress-events.md)); the runner keeps only the latest two while offline.
 - **NeuroPrix's trainer** (`neuroprix-train`, PPO) for all four classes, N4 to N1, on gyms, numbered circuits or
   random Grand Prix circuits. Each session has its own random seed.
 - **The race engine** (`neuroprix.engine`, `neuroprix.env`): the same physics, circuits and senses as the official
