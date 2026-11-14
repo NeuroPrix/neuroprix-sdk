@@ -28,11 +28,12 @@ classifiers = [
 [project.optional-dependencies]
 test = ["pytest>=7"]
 
-# Fill these in with the public repository's address before the first upload to PyPI:
-# [project.urls]
-# Homepage = "https://github.com/<owner>/neuroprix-sdk"
-# Documentation = "https://github.com/<owner>/neuroprix-sdk/blob/main/docs/guide.md"
-# Changelog = "https://github.com/<owner>/neuroprix-sdk/blob/main/CHANGELOG.md"
+[project.urls]
+Homepage = "https://neuroprix.com"
+Source = "https://github.com/NeuroPrix/neuroprix-sdk"
+Documentation = "https://github.com/NeuroPrix/neuroprix-sdk/blob/main/docs/guide.md"
+Changelog = "https://github.com/NeuroPrix/neuroprix-sdk/blob/main/CHANGELOG.md"
+Issues = "https://github.com/NeuroPrix/neuroprix-sdk/issues"
 
 [project.scripts]
 neuroprix-runner = "neuroprix.runner:run"
