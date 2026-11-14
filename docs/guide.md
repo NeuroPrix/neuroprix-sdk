@@ -58,7 +58,7 @@ It prints something like `neuroprix-runner 0.2.0 (engine 2026.11.3)`.
 ### 2. Start the runner and link it to your account
 
 The runner is the program that trains on your computer. Start it with your NeuroPrix server's address: the site's
-address followed by `/api` (in the Garage, **Add a computer** shows the exact command to copy):
+address followed by `/api` (on the site's **Train** page, **Add a computer** shows it):
 
 ```bash
 ~/neuroprix/bin/neuroprix-runner --server https://neuroprix.com/api
@@ -70,22 +70,22 @@ The first time, it shows a code:
 ========================================================
   Link this runner to your NeuroPrix account:
 
-  1. Open the Garage at https://neuroprix.com
-  2. In a driver's Train tab, choose "Add a computer"
+  1. Open https://neuroprix.com and go to the Train page
+  2. Pick a driver; under "Trains on", choose "Add a computer"
   3. Type this code:   K7QF-2MXP
 
   (valid for 10 minutes)
 ========================================================
 ```
 
-In your browser, sign in, open the **Garage**, pick a driver, open its **Train** tab, click **Add a computer**, type
-the code and click **Link a runner**. The runner prints `linked as "your-computer". Waiting for training sessions.`
+In your browser, sign in and open the **Train** page (in the bar at the top), then pick a driver. Under **Trains
+on**, click **Add a computer**, type the code and click **Link a runner**. The runner prints `linked as "your-computer". Waiting for training sessions.`
 
 You only do this once per computer: the runner remembers the link.
 
 ### 3. Train a driver
 
-Leave the runner running. In the Garage, in the driver's **Train** tab:
+Leave the runner running. On the **Train** page, with the driver picked:
 
 1. Choose what to practise on: your gyms, or **Surprise tracks** (a new random circuit every practice run, the best
    preparation for races on circuits the driver hasn't seen).
@@ -94,7 +94,7 @@ Leave the runner running. In the Garage, in the driver's **Train** tab:
 4. Click **Start training**.
 
 The runner picks the session up within about 10 seconds and prints `training <driver> (<class>), session <id>`.
-You watch it in the Garage as usual: the progress chart, a replay of each check, and **Stop and keep the best
+You watch it on the Train page as usual: the progress chart, a replay of each check, and **Stop and keep the best
 version** if you want to end early. When the session ends, the best version becomes the driver's new version, ready
 to race.
 
@@ -123,40 +123,41 @@ Every driver belongs to a **class**. The class decides what the driver can sense
 | N2 | N3 plus a battery: boost and slipstream | 24 → 64 → 12 |
 | N1 | N2 on terrain: hills, crests and banked corners, which it senses ahead | 31 → 64 → 12 |
 
-N4 learns fastest; N1 has the most to learn. You choose the class when you create the driver in the Garage, and it
-doesn't change. (Before November 2026 the classes were called F3, F2 and F1; the runner still accepts those names.)
+N4 learns fastest; N1 has the most to learn. You choose the class with the **Class** switch at the top of the site
+when you create the driver, and it doesn't change. (Before November 2026 the classes were called F3, F2 and F1; the
+runner still accepts those names.)
 The details of what each class senses: [observations-and-actions.md](observations-and-actions.md).
 
 ### Sessions
 
-A **training session** is one go at improving a driver. You start it in the Garage; the runner trains it. A session:
+A **training session** is one go at improving a driver. You start it on the Train page; the runner trains it. A session:
 
 1. **Practises.** Many cars, all driven by this driver, race around the practice circuits. Each round of practice is
    an **update**: a batch of practice runs (8 by default), after which the brain is adjusted a little towards what
    went well. A Standard session is 150 updates, so 1,200 practice runs.
 2. **Checks.** Every 10 updates (you can change this), the driver drives the check circuits on its own, at full
-   speed, without any randomness. That's the score you see in the Garage, with a replay of the drive.
+   speed, without any randomness. That's the score you see on the Train page, with a replay of the drive.
 3. **Keeps the best.** Whenever a check beats every earlier one, that brain is kept and sent to the server. So a
    session never makes a driver worse: if the later updates go badly, you keep the best version from earlier.
 
 Practice uses rewards: points for covering ground, for speed and clean overtakes; penalties for damage, crashes,
-corners taken too fast and lost places. In the Garage, **Driving style** and **All settings…** let you change them;
+corners taken too fast and lost places. On the Train page, **Driving style** and **All settings…** let you change them;
 the runner passes your settings to the trainer.
 
 ### Versions
 
 Each session that ends with a brain gives the driver a new **version**. The next session starts from the driver's
 current version and carries on improving it (or, if you tick the option to start fresh, from a blank brain). A
-driver's history in the Garage lists every session and version.
+driver's **History** tab on the Train page lists every session and version.
 
 ### What goes back to the server
 
 Only three things travel from your computer to the server, all over HTTPS and started by your computer:
 
-- **Progress**: the lines the trainer prints (updates, checks and their replays), for the Garage's live view.
+- **Progress**: the lines the trainer prints (updates, checks and their replays), for the Train page's live view.
 - **Brains**: each new best brain (a small JSON file, about 50 KB). The server checks that it's a brain of the
   driver's class and refuses anything else.
-- **How the session ended**: done, stopped from the Garage, or failed (with the error).
+- **How the session ended**: done, stopped from the Train page, or failed (with the error).
 
 From the server, the runner takes only data: the session's settings (each checked against the list of known
 settings; anything unknown is refused), the gyms, and the driver's current brain. **It never runs code the server
@@ -174,7 +175,7 @@ neuroprix-runner [--server URL] [--name NAME] [--workers N] [--trainer COMMAND] 
 | Option | What it does | Default |
 |---|---|---|
 | `--server URL` | The NeuroPrix server: the site's address followed by `/api` (`https://neuroprix.com/api`). Remembered after the first time, so later you can leave it out. | The remembered one |
-| `--name NAME` | What this computer is called in the Garage's **Trains on** list. Only used when linking. | This computer's name |
+| `--name NAME` | What this computer is called in the Train page's **Trains on** list. Only used when linking. | This computer's name |
 | `--workers N` | How many practice games to run at the same time. More is faster but uses more of your computer. | CPU cores minus 2 (at most 12) |
 | `--trainer COMMAND` | Train with your own trainer instead of NeuroPrix's, e.g. `--trainer "python my_trainer.py"`. See [Write your own trainer](#write-your-own-trainer). | NeuroPrix's PPO trainer |
 | `--relink` | Forget the current link and show a new code (for example, to link this computer to a different account). | |
@@ -198,7 +199,7 @@ neuroprix-runner [--server URL] [--name NAME] [--workers N] [--trainer COMMAND] 
 
 ### Stopping
 
-- **Stop a session**: use **Stop and keep the best version** in the Garage. The runner stops training, the driver
+- **Stop a session**: use **Stop and keep the best version** on the Train page. The runner stops training, the driver
   keeps the best version found so far, and the runner waits for the next session.
 - **Stop the runner**: press **Ctrl+C** (or `docker stop`, or stop the service). If it was training, that session
   ends straight away and the driver keeps its best version so far. Nothing is lost except the training that hadn't
@@ -210,7 +211,7 @@ neuroprix-runner [--server URL] [--name NAME] [--workers N] [--trainer COMMAND] 
   it when the connection is back. You'll see `can't reach the server (...); still training, will send progress when
   it's back`.
 - **Long outages** (more than about 2 minutes, or the computer goes to sleep): the server stops waiting and ends the
-  session as failed, **keeping the best version sent so far**. Start a new session in the Garage to carry on from
+  session as failed, **keeping the best version sent so far**. Start a new session on the Train page to carry on from
   there: it continues from the driver's current version. Sessions don't resume halfway through; a new session picks
   up from the last kept version.
 - **The runner restarted** while training: when it comes back, the server ends that session the same way (best
@@ -222,12 +223,12 @@ To stop a laptop from sleeping during long sessions: on macOS, run the runner wi
 
 ### Several computers, one account
 
-Link as many as you like (each with its own code). Each trains one session at a time. In the Garage, pick which one
+Link as many as you like (each with its own code). Each trains one session at a time. On the Train page, pick which one
 trains each session under **Trains on**. A session sent to a computer that's offline or busy waits for it.
 
 ### Removing a computer
 
-In the Garage, click **Remove** next to the computer under **Trains on**. Its link stops working immediately; if
+On the Train page, click **Remove** next to the computer under **Trains on**. Its link stops working immediately; if
 it's running, it says `this runner was removed from your account; link it again` and shows a new code.
 
 ---
@@ -249,7 +250,7 @@ for scripts, services and containers:
 The link to your account is kept in `~/.neuroprix/runner.json` (on Windows,
 `C:\Users\<you>\.neuroprix\runner.json`). It holds the server address, this runner's name and its **token**: a key
 that lets this computer train your drivers (only that: it can't sign in as you or change anything else). The file
-is readable only by you. **Don't share it or commit it anywhere.** If it leaks, remove the computer in the Garage:
+is readable only by you. **Don't share it or commit it anywhere.** If it leaks, remove the computer on the Train page:
 the token stops working at once. Deleting the file (or `--relink`) makes the runner ask for a new code.
 
 ### Where sessions run
@@ -305,7 +306,7 @@ Any recent distribution. Install the CPU-only PyTorch first (see the Quick start
 
 Any machine with several CPU cores works; a compute-optimised one with 8–32 cores is a good choice. GPU machines cost
 more and don't train faster. Rent it, install the SDK (or use Docker, below), start the runner with
-`--server https://neuroprix.com/api`, and type the code it shows into the Garage. To keep it running after you log
+`--server https://neuroprix.com/api`, and type the code it shows on the Train page. To keep it running after you log
 out, use `tmux` or `screen`, or Docker with `--restart unless-stopped`.
 
 ### Docker
@@ -334,7 +335,7 @@ ends, keeping its best version).
 
 `neuroprix-train` is NeuroPrix's trainer on its own, for experiments: try settings, compare reward ideas, watch the
 numbers. It trains on your computer and writes the brain to a file. (To give a driver a new version, train it
-through the runner: that's how brains reach the Garage.)
+through the runner: that's how brains reach the site.)
 
 ```bash
 neuroprix-train --tier n3 --random-tracks --updates 60 --out experiment.pth
@@ -380,7 +381,7 @@ The runner can run any trainer, written in any language, that follows a small co
 1. It's started as `<your command> --session session.json`. The file says which driver and class, the settings, the
    gyms, the starting brain and where to write the result.
 2. It writes its best brain to the path in `brain_out`, whenever it has a better one.
-3. Optionally, it prints progress events (one JSON object per line) for the Garage's chart and replays.
+3. Optionally, it prints progress events (one JSON object per line) for the Train page's chart and replays.
 
 ```bash
 neuroprix-runner --trainer "python my_trainer.py"
@@ -414,7 +415,7 @@ WARNING: this runner's engine is 2026.11.2, the server's is 2026.12.1: update th
 ```
 
 That means the race physics changed: until you update, your drivers would practise on different physics than the
-races use. The Garage flags such runners too. What changed in each version: [CHANGELOG.md](../CHANGELOG.md). About
+races use. The Train page flags such runners too. What changed in each version: [CHANGELOG.md](../CHANGELOG.md). About
 engine versions: [engine.md](engine.md).
 
 ---
@@ -450,17 +451,17 @@ a firewall or proxy isn't blocking Python. It keeps trying, so it links as soon 
 **The code expired**
 Codes last 10 minutes. The runner shows a new one by itself.
 
-**The Garage says "Type the code your runner shows" or the code isn't accepted**
+**The Train page says "Type the code your runner shows" or the code isn't accepted**
 Type it exactly as shown (the dash is optional; upper or lower case both work), within 10 minutes, while signed in
 to the account the drivers are on.
 
 **`this runner was removed from your account; link it again`**
-The computer was removed in the Garage (or its link was reset). Type the new code it shows.
+The computer was removed on the Train page (or its link was reset). Type the new code it shows.
 
 **The session stays "waiting for its runner"**
 Check that the runner is running and says `Waiting for training sessions`, and that the session was sent to *this*
 computer (under **Trains on**). A runner trains one session at a time: a second one waits for the first to finish.
-The Garage says when a computer is offline or busy.
+The Train page says when a computer is offline or busy.
 
 **`the runner refused this session: unknown setting ...: this runner may be out of date`**
 The server uses a training setting this version doesn't know. Update: `pip install -U neuroprix`.
@@ -484,7 +485,7 @@ The runner (or computer) restarted mid-session. The best version so far was kept
 Python reads the standard `HTTPS_PROXY` environment variable: `HTTPS_PROXY=http://proxy:8080 neuroprix-runner`.
 
 **Starting over**
-Delete `~/.neuroprix/runner.json` (or run with `--relink`) and remove the computer in the Garage.
+Delete `~/.neuroprix/runner.json` (or run with `--relink`) and remove the computer on the Train page.
 
 ---
 
@@ -526,7 +527,7 @@ Yes. Use `--workers 2` (or so) to leave most of the computer free.
 It ends, keeping the best version sent so far. Start a new session to carry on from it.
 
 **Do I need to keep the browser open?**
-No. Once the session is sent to your computer, you can close the browser. Open the Garage any time to see progress.
+No. Once the session is sent to your computer, you can close the browser. Open the Train page any time to see progress.
 
 **Where are my brains stored?**
 On the NeuroPrix server, with your drivers. Nothing stays on your computer after a session.

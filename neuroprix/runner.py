@@ -4,19 +4,19 @@
     python runner/neuroprix_runner.py --server https://neuroprix.com/api           (from a NeuroPrix checkout)
     neuroprix-runner --server ... --trainer "python my_trainer.py"                 (your own trainer)
 
-The first time, it shows a code: in the Garage, open a driver's Train tab, choose "Add a computer" and type it in.
-After that it waits for work: when you start a session for it in the Garage, it trains here and you watch it there as
+The first time, it shows a code: on the site's Train page, pick a driver, choose "Add a computer" and type it in.
+After that it waits for work: when you start a session for it on the Train page, it trains here and you watch it there as
 usual. Leave it running (Ctrl+C to stop; a session it was training then ends, keeping its best version so far).
 
 The trainer is yours to choose. The runner prepares each session in a fresh folder and runs the trainer command with
 `--session <folder>/session.json`. A trainer (any language) reads that file, trains, and writes its best brain to the
 path the file names (brain_out) whenever it has a better one; the runner uploads each new version. It may also print
-progress events (one JSON object per line) for the Garage's live view and previews. That's the whole contract: see
+progress events (one JSON object per line) for the Train page's live view and previews. That's the whole contract: see
 docs/trainer-contract.md in the SDK. By default the runner uses NeuroPrix's own trainer (PPO).
 
 From the server the runner takes data only: the session's settings (checked against the known training settings),
 gyms and the starting brain. It never runs anything the server sends. Its link to your account is a token in
-~/.neuroprix/runner.json; remove the runner in the Garage to revoke it. Talks to the server over HTTP(S) with Python's
+~/.neuroprix/runner.json; remove the runner on the Train page to revoke it. Talks to the server over HTTP(S) with Python's
 standard library only.
 """
 from __future__ import annotations
@@ -218,7 +218,7 @@ def save_config(cfg: dict) -> None:
 
 
 def pair(server: str, name: str, info: dict) -> dict:
-    """Get a code, show it, wait until it's entered in the Garage."""
+    """Get a code, show it, wait until it's entered on the Train page."""
     api = Api(server)
     while True:
         try:
@@ -229,7 +229,7 @@ def pair(server: str, name: str, info: dict) -> dict:
             continue
         bar = "=" * 56
         print(f"\n{bar}\n  Link this runner to your NeuroPrix account:\n\n"
-              f"  1. Open the Garage at {server.removesuffix('/api')}\n  2. In a driver's Train tab, choose \"Add a computer\"\n"
+              f"  1. Open {server.removesuffix('/api')} and go to the Train page\n  2. Pick a driver; under \"Trains on\", choose \"Add a computer\"\n"
               f"  3. Type this code:   {clean(p['code'])[:20]}\n\n  (valid for {int(p['expires_in']) // 60} minutes)\n{bar}\n", flush=True)
         while True:
             time.sleep(2)
@@ -355,7 +355,7 @@ def run_job(api: Api, job: dict, workers: int, trainer: list[str]) -> None:
                     pending, last_post, last_ok = pending[1500:], now, now
                     if r.get("stop") and not stopping:
                         stopping = True
-                        say("  stopped from the Garage" + (" (keeping the best version so far)" if r.get("keep") else ""))
+                        say("  stopped from the Train page" + (" (keeping the best version so far)" if r.get("keep") else ""))
                         stop_tree(proc)
                 except ServerError as e:
                     if e.status in (401, 404):
@@ -414,7 +414,7 @@ def main() -> None:
         signal.signal(signal.SIGTERM, _quit)
     ap = argparse.ArgumentParser(description="NeuroPrix Runner: train your drivers on this machine.")
     ap.add_argument("--server", default=os.environ.get("NEUROPRIX_SERVER"), help="the NeuroPrix server, e.g. https://neuroprix.com/api (remembered)")
-    ap.add_argument("--name", default=None, help="what to call this runner in the Garage (default: this computer's name)")
+    ap.add_argument("--name", default=None, help="what to call this runner on the Train page (default: this computer's name)")
     ap.add_argument("--workers", type=int, default=max(1, min(12, (os.cpu_count() or 2) - 2)),
                     help="games to run in parallel while training (default: CPU cores minus 2)")
     ap.add_argument("--trainer", default=os.environ.get("NEUROPRIX_TRAINER"),

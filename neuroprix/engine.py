@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 
 # The engine's version: bump it whenever the physics, the circuits or what drivers sense changes (the same number is in
-# game/index.html as ENGINE_VERSION). Runners report theirs, and the Garage flags a runner whose engine is out of date
+# game/index.html as ENGINE_VERSION). Runners report theirs, and the Train page flags a runner whose engine is out of date
 # (it would be training on different physics than the races use).
 ENGINE_VERSION = "2026.11.3"
 

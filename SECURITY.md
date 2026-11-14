@@ -10,7 +10,7 @@ Please don't open a public issue for a security problem. Use **Report a vulnerab
 - **Your runner's token** (in `~/.neuroprix/runner.json`) lets a computer train your drivers, nothing more: it can't
   sign in as you or change your account. The file is created readable only by you. The token is only sent over
   HTTPS (plain HTTP only to a server on the same computer, or with `--allow-http`), and the runner never follows a
-  redirect, so the token only goes to the address you linked. If it leaks, remove that computer in the Garage: the
+  redirect, so the token only goes to the address you linked. If it leaks, remove that computer on the Train page: the
   token stops working at once.
 - **Your computer.** The runner connects out to the server and opens no ports. The server sends data only: every
   training setting is checked against a fixed list, ids are checked before they're used, brains travel as JSON

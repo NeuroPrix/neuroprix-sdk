@@ -30,7 +30,7 @@ A trainer is any program the runner can start. The runner prepares each session 
 |---|---|
 | `neuroprix_session` | The format's version (1). Refuse versions you don't know. |
 | `driver`, `class` | The driver's name and class (`n4`, `n3`, `n2`, `n1`): the brain must be that class's shape (see brain-format.md). |
-| `settings` | What the player chose in the Garage: session length (`updates`), checks (`eval_every`), cars per practice run (`traffic`), practice on random Grand Prix circuits (`random_tracks`), `seeds` (circuit numbers), `one_way` (gyms only as drawn), and reward weights (`progress`, `fast`, `damage`, `crash`, `corner`, `overtake`, `lose_place`, …). Use what makes sense for your trainer; ignore the rest. |
+| `settings` | What the player chose on the Train page: session length (`updates`), checks (`eval_every`), cars per practice run (`traffic`), practice on random Grand Prix circuits (`random_tracks`), `seeds` (circuit numbers), `one_way` (gyms only as drawn), and reward weights (`progress`, `fast`, `damage`, `crash`, `corner`, `overtake`, `lose_place`, …). Use what makes sense for your trainer; ignore the rest. |
 | `tracks` | The gyms to practise on (Gym Editor format; `neuroprix.engine.build_track` reads them). |
 | `start_brain` | Continuing a driver: its current brain (JSON). `null` for a new driver. `start_weights` is always `null` (the runner never writes PyTorch files it was sent: make your own from `start_brain`). |
 | `brain_out` | Where to write your best brain. |
@@ -47,14 +47,14 @@ next version. If you never write one, the session ends as failed.
 ## 3. Optionally, print progress
 
 Print one JSON object per line to stdout (other lines are kept as the session's log): see progress-events.md. With
-`update` events the Garage shows the session's chart and how far along it is; with `eval` events it shows each check's
+`update` events the Train page shows the session's chart and how far along it is; with `eval` events it shows each check's
 score and replay.
 
 ## 4. How it ends
 
 - Exit with code 0: the session is **done** (the last brain you wrote becomes the next version).
-- Exit with another code: **failed** (the last brain you wrote can still be kept: the Garage offers it).
-- Stop in the Garage: the runner sends your program SIGTERM (on Windows, it ends the process tree). The last brain you
+- Exit with another code: **failed** (the last brain you wrote can still be kept: the Train page offers it).
+- Stop on the Train page: the runner sends your program SIGTERM (on Windows, it ends the process tree). The last brain you
   wrote is kept if the player chose "Stop and keep".
 
 ## Tips

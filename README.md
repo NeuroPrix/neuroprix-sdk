@@ -22,10 +22,10 @@ python3 -m venv ~/neuroprix                     # a separate environment for it
 
 (On Windows: `py -m venv $HOME\neuroprix`, then `$HOME\neuroprix\Scripts\pip` and `...\Scripts\neuroprix-runner`.)
 
-1. The runner shows a code. In the Garage, open a driver's **Train** tab, click **Add a computer**, type the code and
-   click **Link a runner**. (Once per computer: it remembers the link.)
+1. The runner shows a code. On the site, open the **Train** page and pick a driver. Under **Trains on**, click
+   **Add a computer**, type the code and click **Link a runner**. (Once per computer: it remembers the link.)
 2. Under **Trains on**, choose your computer, then click **Start training**.
-3. The runner trains the session; you watch it in the Garage as usual (progress, the replay of each check, Stop and
+3. The runner trains the session; you watch it on the Train page as usual (progress, the replay of each check, Stop and
    keep). The best version becomes your driver's new version.
 
 Leave the runner running: it trains every session you send it, one at a time. Ctrl+C stops it.
@@ -41,7 +41,7 @@ docker run -it -v neuroprix:/home/runner/.neuroprix neuroprix-runner --server ht
 
 | Part | What it is |
 |---|---|
-| `neuroprix-runner` (`neuroprix.runner`) | Links a computer to your account, takes the sessions you start in the Garage, runs a trainer and sends back its progress and brains |
+| `neuroprix-runner` (`neuroprix.runner`) | Links a computer to your account, takes the sessions you start on the Train page, runs a trainer and sends back its progress and brains |
 | `neuroprix-train` (`neuroprix.train`) | NeuroPrix's own trainer (PPO): what the runner uses by default, and a baseline to run on its own, copy or change |
 | `neuroprix.engine`, `neuroprix.env` | The race engine: the same physics, circuits and senses the official races use (versioned) |
 | `neuroprix.brain` | Brains: the network for each class, saving and loading |
@@ -67,7 +67,7 @@ The runner runs a **trainer**: any program that follows a small contract ([docs/
    [docs/brain-format.md](docs/brain-format.md)). The runner uploads each new version; the last one becomes the
    driver's next version.
 3. Optionally, it prints progress events, one JSON object per line ([docs/progress-events.md](docs/progress-events.md)),
-   for the Garage's live chart and the replay of each check.
+   for the Train page's live chart and the replay of each check.
 
 ```bash
 neuroprix-runner --trainer "python my_trainer.py"
@@ -96,7 +96,7 @@ What a driver senses and can do in each class: [docs/observations-and-actions.md
 - **The brain's shape is fixed per class.** Train however you like; the server refuses a brain of the wrong shape or
   class.
 - **The engine is versioned** (`neuroprix.ENGINE_VERSION`). When the physics changes, update the SDK
-  (`pip install -U neuroprix`): the runner warns you, and the Garage flags a runner whose engine is out of date,
+  (`pip install -U neuroprix`): the runner warns you, and the Train page flags a runner whose engine is out of date,
   since it would be training on different physics than the races use. Big changes come between seasons.
 - **Races run on the server.** Nothing you change in the SDK changes a race; a better-trained brain just drives better.
 - **The server sends data, never code.** The runner checks every setting it's sent against a fixed list and only

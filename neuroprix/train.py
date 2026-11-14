@@ -425,7 +425,7 @@ def _drive(env, model, gen, tier, spec, cars, max_steps, record=None, others=Non
     """One run: car 0 drives its most likely action; any other cars drive the same brain with its natural
     randomness (identical deterministic cars would just pile into each other). Returns car 0's end state,
     the race length in px and car 0's touches. record: car 0's path; others: the other cars' paths and how
-    each one ended (for the replay in the Train tab)."""
+    each one ended (for the replay on the Train page)."""
     info = env.setup_world(spec, cars, tier=tier)
     states = env.reset_world()
     n, touches, steps, walls = len(states), 0, 0, 0
@@ -499,7 +499,7 @@ def evaluate(env, model, specs, cars, max_steps, record=None, preview=None, show
 
 
 def preview_drive(env, model, spec, cars, max_steps, record, preview) -> None:
-    """The replay shown in the Train tab, on a circuit that isn't part of the score (Surprise tracks sessions get a fresh
+    """The replay shown on the Train page, on a circuit that isn't part of the score (Surprise tracks sessions get a fresh
     one at every check): the field if the session trains in traffic, else the driver alone."""
     gen = generation(model)
     tier = TIER_OF_GEN.get(gen, "n4")
@@ -774,7 +774,7 @@ def main() -> None:
     last_net = [0.0]
 
     def send_net(update: int) -> None:
-        """The brain's weights now (rounded), for the Garage's live brain view: at the start, every few seconds, at checks."""
+        """The brain's weights now (rounded), for the Train page's live brain view: at the start, every few seconds, at checks."""
         if not args.progress_json:
             return
         last_net[0] = time.time()

@@ -118,7 +118,7 @@ def test_stop_and_keep_from_the_garage(server, start_runner):
     server.jobs[jid]["stop"] = server.jobs[jid]["keep"] = True
     j = server.wait_finish(jid, timeout=60)
     assert j["finish"]["status"] == "stopped"
-    r.wait_output("stopped from the Garage")
+    r.wait_output("stopped from the Train page")
     r.wait_output("waiting for training sessions")
 
 

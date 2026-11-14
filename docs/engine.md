@@ -6,7 +6,7 @@ code, and the website's game runs a JavaScript copy of it that's checked step by
 
 `neuroprix.engine.ENGINE_VERSION` names the version (e.g. `2026.11.2`, which added N1's hills and banking). It changes whenever the physics, the
 circuits or what drivers sense changes. The runner reports its version; if the server's is newer, the runner prints a
-warning and the Garage flags the runner, because it would be training on different physics than the races use.
+warning and the Train page flags the runner, because it would be training on different physics than the races use.
 Update with `pip install -U neuroprix` (or rebuild the Docker image).
 
 What a change means for your drivers: they keep racing, on the new physics, and may drive worse until they're

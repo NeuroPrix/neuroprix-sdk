@@ -18,7 +18,7 @@ SHAPES = {"n4": (18, 3, 3), "n3": (22, 9, 5), "n2": (24, 12, 6), "n1": (31, 12, 
 HIDDEN = 64
 
 
-def say(**event):   # a progress event for the Garage (one JSON object per line)
+def say(**event):   # a progress event for the Train page (one JSON object per line)
     print(json.dumps(event), flush=True)
 
 

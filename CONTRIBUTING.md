@@ -12,7 +12,7 @@ Open an issue with:
 Security problems: please report them privately (see [SECURITY.md](SECURITY.md)), not in an issue.
 
 Please don't post the contents of `~/.neuroprix/runner.json`: it holds your runner's token. If a token leaks, remove
-that computer in the Garage; the token stops working at once.
+that computer on the Train page; the token stops working at once.
 
 ## Running the tests
 
