@@ -646,16 +646,13 @@ OBS_N1 = OBS_F1C + 2 * len(CORNER_LOOK) + 1
 
 
 # Championship classes: N4 (steering only), N3 (+ pedals), N2 (+ battery boost and slipstream), N1 (+ hills and banked
-# corners: the 2.5D class; its circuits are generate_track_spec(seed, "n1")). Until November 2026 they were called F3, F2 and F1: those codes are
-# still accepted wherever a class comes in (saved files, the API, the trainer's --tier).
+# corners: the 2.5D class; its circuits are generate_track_spec(seed, "n1")).
 CLASSES = ("n4", "n3", "n2", "n1")
-CLASS_ALIAS = {"f3": "n4", "f2": "n3", "f1": "n2"}
 
 
 def norm_class(c, default: str | None = None):
-    """A class code in today's names ('f2' -> 'n3'); default if it isn't one."""
+    """A class code, lower-cased ('N3' -> 'n3'); default if it isn't one."""
     c = str(c or "").strip().lower()
-    c = CLASS_ALIAS.get(c, c)
     return c if c in CLASSES else default
 
 

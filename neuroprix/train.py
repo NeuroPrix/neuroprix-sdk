@@ -41,7 +41,7 @@ from torch.distributions import Categorical
 
 from neuroprix.browser_env import RaceEnv, load_track_spec
 from neuroprix.env import SimEnv
-from neuroprix.brain import CLASS_ALIAS, GEN_OF_SHAPE, LEGACY, N_HIDDEN, PEDALS, TIER_OF_GEN, TIERS, RaceBrain, generation, load_weights, save_brain, state_to_obs  # noqa: E402
+from neuroprix.brain import GEN_OF_SHAPE, LEGACY, N_HIDDEN, PEDALS, TIER_OF_GEN, TIERS, RaceBrain, generation, load_weights, save_brain, state_to_obs  # noqa: E402
 
 # Rewards (per step of 4 frames). Further along the track is a better episode.
 # A step with no new best distance pays R_IDLE. A step that advances pays for every
@@ -525,7 +525,7 @@ def session_argv(path: str) -> list[str]:
     if s.get("neuroprix_session") != 1:
         sys.exit("unknown session format: update the trainer")
     argv = ["--progress-json", "--name", str(s.get("driver") or "driver")[:64],
-            "--tier", CLASS_ALIAS.get(str(s.get("class", "n3")).lower(), str(s.get("class", "n3")).lower())]
+            "--tier", str(s.get("class", "n3")).lower()]
     for k, v in (s.get("settings") or {}).items():
         if k in SESSION_SWITCHES:
             if v:
@@ -559,7 +559,7 @@ def main() -> None:
     ap.add_argument("--track", action="append", default=[], help="track JSON from the Gym Editor (repeatable)")
     ap.add_argument("--seeds", default="", help="comma-separated procedural seeds to train on, e.g. 1,2,3")
     ap.add_argument("--random-tracks", action="store_true", help="fresh procedural circuit every episode")
-    ap.add_argument("--tier", type=lambda c: CLASS_ALIAS.get(c.lower(), c.lower()), choices=["n4", "n3", "n2", "n1"], default="n3",
+    ap.add_argument("--tier", type=str.lower, choices=["n4", "n3", "n2", "n1"], default="n3",
                     help="n4: steering only (fast to train); n3: steering + pedals; n2: + battery boost and slipstream inputs")
     ap.add_argument("--traffic", type=int, default=4, help="cars per episode, all driven by this driver (1 = alone)")
     ap.add_argument("--updates", type=int, default=150, help="policy updates")

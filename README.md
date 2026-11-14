@@ -55,8 +55,6 @@ docker run -it -v neuroprix:/home/runner/.neuroprix neuroprix-runner --server ht
 | N2 | N3 plus a battery: boost and slipstream | 24 → 64 → 12 |
 | N1 | N2 on terrain: hills, crests and banked corners, which it senses ahead | 31 → 64 → 12 |
 
-(Until November 2026 NeuroPrix was called NeuroRacer, and N4/N3/N2 were F3/F2/F1; the old codes are still accepted.)
-
 ## Train your own way
 
 The runner runs a **trainer**: any program that follows a small contract ([docs/trainer-contract.md](docs/trainer-contract.md)):

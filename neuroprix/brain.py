@@ -39,7 +39,6 @@ LEGACY = {"n3": (N_INPUTS, N_ACTIONS), "n2": F1_SHAPE}              # earlier br
                                                                     # still race, and training upgrades them
 GEN_OF_SHAPE = {GEN1: 1, (N_INPUTS, N_ACTIONS): 2, F3_SHAPE: 3, F1_SHAPE: 4, F2C_SHAPE: 5, F1C_SHAPE: 6, N1_SHAPE: 7}
 TIER_OF_GEN = {1: "n4", 2: "n3", 3: "n4", 4: "n2", 5: "n3", 6: "n2", 7: "n1"}
-CLASS_ALIAS = {"f3": "n4", "f2": "n3", "f1": "n2"}   # the classes' names until November 2026 (still accepted)
 PEDALS = {"n3": 3, "n2": 4, "n1": 4}                 # pedal choices per tier (N4 has none)
 STEER = ("left", "straight", "right")
 PEDAL = ("accelerate", "coast", "brake", "boost")

@@ -42,9 +42,7 @@ import urllib.request
 from pathlib import Path
 
 VERSION = "0.2.0"
-CONFIG = Path(os.environ.get("NEUROPRIX_RUNNER_CONFIG") or os.environ.get("NEURORACER_RUNNER_CONFIG")
-              or Path.home() / ".neuroprix" / "runner.json")
-OLD_CONFIG = Path.home() / ".neuroracer" / "runner.json"   # where it was kept before the rename (NeuroRacer)
+CONFIG = Path(os.environ.get("NEUROPRIX_RUNNER_CONFIG") or Path.home() / ".neuroprix" / "runner.json")
 SESSION_FORMAT = 1
 
 
@@ -79,7 +77,6 @@ NUMBER_SETTINGS = {"updates", "batch", "eval-every", "traffic", "max-steps", "ep
                    "lr", "entropy", "gamma", "lam", "clip"}
 INT_SETTINGS = {"updates", "batch", "eval-every", "traffic", "max-steps", "epochs", "minibatch", "check-tracks"}
 SWITCHES = {"random-tracks", "one-way"}
-CLASS_ALIAS = {"f3": "n4", "f2": "n3", "f1": "n2"}   # the classes' names before November 2026
 
 
 def session_settings(flags: list) -> dict:
@@ -106,7 +103,7 @@ def session_settings(flags: list) -> dict:
                 raise ValueError("odd driver name")
             out["name"] = v
         elif name == "tier":
-            c = CLASS_ALIAS.get(v.lower(), v.lower())
+            c = v.lower()
             if not re.match(r"^n[1-4]$", c):
                 raise ValueError("unknown class")
             out["class"] = c
@@ -195,12 +192,10 @@ def machine_info(workers: int, trainer: str) -> dict:
 
 
 def load_config() -> dict:
-    for path in (CONFIG, OLD_CONFIG):
-        try:
-            return json.loads(path.read_text())
-        except Exception:
-            continue
-    return {}
+    try:
+        return json.loads(CONFIG.read_text())
+    except Exception:
+        return {}
 
 
 def save_config(cfg: dict) -> None:

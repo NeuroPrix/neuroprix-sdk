@@ -105,7 +105,7 @@ def test_wrong_shape_brain_is_refused():
 
 
 def test_session_settings_accepts_the_known_settings():
-    s = session_settings(["--name", "Jango", "--tier", "f1", "--updates", "400.0", "--random-tracks", "--damage", "-90",
+    s = session_settings(["--name", "Jango", "--tier", "N2", "--updates", "400.0", "--random-tracks", "--damage", "-90",
                           "--seeds", "3,8,21", "--one-way"])
     assert s == {"name": "Jango", "class": "n2", "updates": 400, "random_tracks": True, "damage": -90.0,
                  "seeds": [3, 8, 21], "one_way": True}
@@ -115,6 +115,7 @@ def test_session_settings_accepts_the_known_settings():
     ["--resume", "/etc/passwd"],          # paths and unknown options are never taken from the server
     ["--updates"],                        # no value
     ["--tier", "f9"],                     # unknown class
+    ["--tier", "f1"],                     # the classes' names before N4-N1: not accepted
     ["updates", "3"],                     # not an option
     ["--name", "bad\nname"],
     ["--seeds", "1;rm -rf /"],

@@ -124,8 +124,7 @@ Every driver belongs to a **class**. The class decides what the driver can sense
 | N1 | N2 on terrain: hills, crests and banked corners, which it senses ahead | 31 → 64 → 12 |
 
 N4 learns fastest; N1 has the most to learn. You choose the class with the **Class** switch at the top of the site
-when you create the driver, and it doesn't change. (Before November 2026 the classes were called F3, F2 and F1; the
-runner still accepts those names.)
+when you create the driver, and it doesn't change.
 The details of what each class senses: [observations-and-actions.md](observations-and-actions.md).
 
 ### Sessions
