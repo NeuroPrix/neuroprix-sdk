@@ -17,7 +17,7 @@ It's sent as JSON (`brain_out`, and the starting brain in a session):
 
 ```json
 {
-  "name": "Jango",
+  "name": "Dex Jango",
   "arch": "mlp-24-64-12",
   "generation": 6,
   "fc1": {"weight": [[...24 numbers...], ... 64 rows], "bias": [...64 numbers...]},

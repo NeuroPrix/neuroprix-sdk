@@ -188,7 +188,7 @@ neuroprix-runner [--server URL] [--name NAME] [--workers N] [--trainer COMMAND] 
 
 ```
 22:41:07 NeuroPrix Runner 0.2.0: "my-pc" on https://neuroprix.com/api, 6 games in parallel, trainer: NeuroPrix PPO. Waiting for training sessions (Ctrl+C to quit).
-22:43:15 training Jango (N2), session a6480de05a
+22:43:15 training Dex Jango (N2), session a6480de05a
 22:44:02   update 25
 22:44:51   update 50
 ...

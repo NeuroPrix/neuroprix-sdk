@@ -14,7 +14,7 @@ A trainer is any program the runner can start. The runner prepares each session 
 {
   "neuroprix_session": 1,
   "id": "a6480de05a",
-  "driver": "Jango",
+  "driver": "Dex Jango",
   "class": "n2",
   "settings": {"updates": 400, "batch": 8, "eval_every": 10, "traffic": 4, "random_tracks": true, "damage": -90.0},
   "tracks": [{"name": "My first gym", "control": [[120, 300], [164, 200], ...], "width": 90, "grip": 1, "laps": 2, "obstacles": []}],
@@ -29,7 +29,7 @@ A trainer is any program the runner can start. The runner prepares each session 
 | Field | Meaning |
 |---|---|
 | `neuroprix_session` | The format's version (1). Refuse versions you don't know. |
-| `driver`, `class` | The driver's name and class (`n4`, `n3`, `n2`, `n1`): the brain must be that class's shape (see brain-format.md). |
+| `driver`, `class` | The driver's full name (first and last, in plain ASCII: accents dropped; names aren't unique, so don't use it as a key) and class (`n4`, `n3`, `n2`, `n1`): the brain must be that class's shape (see brain-format.md). |
 | `settings` | What the player chose on the Train page: session length (`updates`), checks (`eval_every`), cars per practice run (`traffic`), practice on random Grand Prix circuits (`random_tracks`), `seeds` (circuit numbers), `one_way` (gyms only as drawn), and reward weights (`progress`, `fast`, `damage`, `crash`, `corner`, `overtake`, `lose_place`, …). Use what makes sense for your trainer; ignore the rest. |
 | `tracks` | The gyms to practise on (Gym Editor format; `neuroprix.engine.build_track` reads them). |
 | `start_brain` | Continuing a driver: its current brain (JSON). `null` for a new driver. `start_weights` is always `null` (the runner never writes PyTorch files it was sent: make your own from `start_brain`). |
