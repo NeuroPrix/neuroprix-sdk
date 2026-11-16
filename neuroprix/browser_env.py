@@ -59,13 +59,16 @@ class RaceEnv:
 
     # ----- generation 2: a field of cars (and simulated people) on one track -----
     def setup_world(self, spec: dict, cars: int = 1, random_start: bool = False, tier: str = "n3", speed_cap: float = 1.0,
-                    fragile: bool = False, caps: list[float] | None = None, gen: int | None = None) -> dict:
+                    fragile: bool = False, caps: list[float] | None = None, gen: int | None = None,
+                    gens: list[int] | None = None, rolling: float = 0.0) -> dict:
         """tier: "n3" (steering + pedals) or "n4" (steering only). random_start: put the grid at a random
         point round the circuit (training episodes only). gen: a particular brain kind (an earlier brain in a time trial
-        sees only the inputs it was built for); by default the class's current one."""
+        sees only the inputs it was built for); by default the class's current one. gens: one kind per car (a mixed
+        field). rolling: a rolling start at this share of top speed."""
         self.track_info = self.page.evaluate("([s, o]) => window.setupWorld(s, o)",
                                              [spec, {"cars": cars, "randomStart": random_start, "tier": tier, "speedCap": speed_cap,
-                                                     "fragile": fragile, "caps": caps or [], "gen": gen}])
+                                                     "fragile": fragile, "caps": caps or [], "gen": gen, "gens": gens or [],
+                                                     "rolling": rolling}])
         self._loaded_key = None
         return self.track_info
 

@@ -6,6 +6,8 @@ Tiers (like the N4 / N3 / N2 ladder; the brain's shape says which it is):
   N2          21 inputs -> 12 actions  N3 + battery and slipstream inputs; pedals accelerate / coast / brake / BOOST
   N4 classic   6 inputs -> 3 actions   the first drivers: wall rays + speed, no radar (still races in N4)
 Internally a brain's "generation" is its kind: 1 = N4 classic, 2 = N3, 3 = N4, 4 = N2.
+The sector-radar generation (kinds 8 = N4, 9 = N3, 10 = N2, 11 = N1; docs/sector-radar.md) has the same senses with
+the 2-slot radar (12 inputs) swapped for 8 sectors all round the car (32): 20 more inputs in each class.
 
 N3 in detail:
   Input  (19): 5 wall rays [L, diag-L, front, diag-R, R]; a radar reporting the 2 nearest cars or
@@ -37,8 +39,14 @@ N1_SHAPE = (F1C_SHAPE[0] + 2 * N_CORNER + 1, 12)     # N1 (generation 7): + grad
 TIERS = {"n4": F3_SHAPE, "n3": F2C_SHAPE, "n2": F1C_SHAPE, "n1": N1_SHAPE}   # what training makes
 LEGACY = {"n3": (N_INPUTS, N_ACTIONS), "n2": F1_SHAPE}              # earlier brains of a class (no corner sense): they
                                                                     # still race, and training upgrades them
-GEN_OF_SHAPE = {GEN1: 1, (N_INPUTS, N_ACTIONS): 2, F3_SHAPE: 3, F1_SHAPE: 4, F2C_SHAPE: 5, F1C_SHAPE: 6, N1_SHAPE: 7}
-TIER_OF_GEN = {1: "n4", 2: "n3", 3: "n4", 4: "n2", 5: "n3", 6: "n2", 7: "n1"}
+# the sector radar: 8 sectors x 4 numbers instead of 2 slots x 6 (radar inputs start at RADAR_AT, after the 5 wall rays)
+RADAR_AT, SLOT_RADAR, SECTOR_RADAR = 5, 12, 32
+EMPTY_SLOTS = [0, 1, 0.5, 0.5, 0.5, 0] * 2           # what today's radar reads with nobody in range
+SECTOR_TIERS = {t: (n + SECTOR_RADAR - SLOT_RADAR, a) for t, (n, a) in TIERS.items()}   # n4 38, n3 42, n2 44, n1 51
+SENSES = {"slots": TIERS, "sectors": SECTOR_TIERS}
+GEN_OF_SHAPE = {GEN1: 1, (N_INPUTS, N_ACTIONS): 2, F3_SHAPE: 3, F1_SHAPE: 4, F2C_SHAPE: 5, F1C_SHAPE: 6, N1_SHAPE: 7,
+                SECTOR_TIERS["n4"]: 8, SECTOR_TIERS["n3"]: 9, SECTOR_TIERS["n2"]: 10, SECTOR_TIERS["n1"]: 11}
+TIER_OF_GEN = {1: "n4", 2: "n3", 3: "n4", 4: "n2", 5: "n3", 6: "n2", 7: "n1", 8: "n4", 9: "n3", 10: "n2", 11: "n1"}
 PEDALS = {"n3": 3, "n2": 4, "n1": 4}                 # pedal choices per tier (N4 has none)
 STEER = ("left", "straight", "right")
 PEDAL = ("accelerate", "coast", "brake", "boost")
@@ -69,10 +77,24 @@ def tier_of(model: "RaceBrain") -> str:
 def state_to_obs(state: dict, gen: int = 2) -> torch.Tensor:
     """Game state JSON -> input tensor (already normalised 0..1 by the game)."""
     feats = [float(v) for v in state["sensors"]] + [float(state["speed"])] if gen == 1 else state["obs"]
-    want = {1: GEN1[0], 2: N_INPUTS, 3: F3_SHAPE[0], 4: F1_SHAPE[0], 5: F2C_SHAPE[0], 6: F1C_SHAPE[0], 7: N1_SHAPE[0]}[gen]
+    want = {g: shape[0] for shape, g in GEN_OF_SHAPE.items()}[gen]
     if len(feats) != want:
         raise ValueError(f"expected {want} features, got {len(feats)}")
     return torch.tensor(feats, dtype=torch.float32).clamp_(0.0, 1.0)
+
+
+def to_sectors(sd: dict) -> dict:
+    """A brain of today's kind (2-slot radar) moved to the sector-radar kind of its class (docs/sector-radar.md, section
+    5): the weights from every input both kinds have are copied, the old radar's weights are dropped (what they added
+    with nobody in range is folded into the hidden biases) and the new radar's weights start at 0. With no car in
+    range it makes exactly the choices the old brain made with nobody in range."""
+    W, b = sd["fc1.weight"], sd["fc1.bias"]
+    old = W[:, RADAR_AT:RADAR_AT + SLOT_RADAR]
+    new = torch.zeros(W.shape[0], SECTOR_RADAR, dtype=W.dtype)
+    out = dict(sd)
+    out["fc1.weight"] = torch.cat([W[:, :RADAR_AT], new, W[:, RADAR_AT + SLOT_RADAR:]], dim=1)
+    out["fc1.bias"] = b + old @ torch.tensor(EMPTY_SLOTS, dtype=W.dtype)
+    return out
 
 
 def save_brain(model: RaceBrain, path: str | Path, name: str = "agent") -> None:

@@ -20,6 +20,36 @@ The car decides 15 times a second: each decision lasts 4 physics frames (60 fram
 
 N4 has inputs 1–18. N3 has 1–19 and the corners (22). N2 has 1–24. N1 has all 31.
 
+## The sector radar (the next generation of brain)
+
+The engine also has a second radar, the brain kinds 8–11 (N4 38 inputs, N3 42, N2 44, N1 51). A class races one
+kind at a time, so every driver in a race senses the same things: a class moves to the sector radar on a set date,
+announced in advance; until then its races use the radar above. You can train sector-radar brains already
+(`neuroprix-train --senses sectors`; `--resume` with one of today's brains moves it across).
+
+It replaces inputs 6–17 with 32 inputs: the circle round the car is cut into 8 sectors, and each reports the nearest
+car whose centre is in it, within 200 px, behind as well as ahead. Everything else keeps its order, 20 places later.
+
+| Sector | Bearing from the nose (+ = right) |
+|---|---|
+| front | −15° to +15° |
+| front-left / front-right | 15° to 60° either side |
+| left / right | 60° to 120° either side |
+| rear-left / rear-right | 120° to 160° either side |
+| rear | the last 40°, behind |
+
+In that order (front, front-left, left, rear-left, rear, rear-right, right, front-right), 4 numbers each:
+
+| Input | Meaning | Empty sector |
+|---|---|---|
+| seen | 1 if a car is in the sector | 0 |
+| near | 1 − distance ÷ 200 px (centre to centre): 1 = touching | 0 |
+| closing | 0.5 + how fast the gap is shrinking ÷ 10 px a frame: above 0.5 = getting closer, whether it's catching you or you're catching it | 0.5 |
+| sideways | 0.5 + its sideways speed relative to you ÷ 10 px a frame: above 0.5 = moving to your right | 0.5 |
+
+A wrecked car reads as a car standing still. Obstacles aren't on the radar (stones stop the wall rays, as before), so
+the "is a car" input is gone.
+
 ## Actions
 
 - **N4** (3): 0 = left, 1 = straight, 2 = right. The throttle is automatic.

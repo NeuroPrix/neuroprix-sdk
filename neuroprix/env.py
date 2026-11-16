@@ -15,6 +15,8 @@ from pathlib import Path
 from neuroprix import engine as sim
 
 GEN_OF_TIER = {"n4": 3, "n3": 5, "n2": 6, "n1": 7}   # each class's current brain kind (N1: hills and banking)
+KINDS = (2, 3, 4, 5, 6, 7, 8, 9, 10, 11)              # brain kinds a training car can have (8-11: the sector radar)
+MAX_CARS = 10                                         # a training field: up to a full race grid
 
 
 class _NoBrain:
@@ -57,16 +59,23 @@ class SimEnv:
         return T
 
     def setup_world(self, spec: dict, cars: int = 1, random_start: bool = False, tier: str = "n3", speed_cap: float = 1.0,
-                    fragile: bool = False, caps: list[float] | None = None, gen: int | None = None) -> dict:
+                    fragile: bool = False, caps: list[float] | None = None, gen: int | None = None,
+                    gens: list[int] | None = None, rolling: float = 0.0) -> dict:
+        """gen: the brain kind of every car (default: the class's current one); gens: one kind per car instead (a field
+        of mixed kinds: league opponents of an earlier generation). rolling: a rolling start, every car already moving
+        at this share of top speed (0 = standing)."""
         T = self.track = self._build(spec, "n1" if str(tier).lower() == "n1" else None)
         self.world = sim.World(T)
         self.random_start = bool(random_start)
-        n = int(_clamp(int(cars or 1), 1, 8))
-        g = gen if gen in (2, 3, 4, 5, 6, 7) else GEN_OF_TIER.get(str(tier).lower() if str(tier).lower() == "n1" else sim.norm_class(tier, "n3"), 5)
+        self.rolling = _clamp(float(rolling or 0), 0.0, 1.0)
+        n = int(_clamp(int(cars or 1), 1, MAX_CARS))
+        g = gen if gen in KINDS else GEN_OF_TIER.get(str(tier).lower() if str(tier).lower() == "n1" else sim.norm_class(tier, "n3"), 5)
+        gens = gens or []
         caps = caps or []
         self._cars = []
         for i in range(n):
-            c = sim.Car(track=T, brain=_NoBrain(g), name=str(i))
+            gi = gens[i] if i < len(gens) and gens[i] in KINDS else g
+            c = sim.Car(track=T, brain=_NoBrain(gi), name=str(i))
             c.training, c.touched = True, {}
             c.cap_k = _clamp(float(caps[i]) if i < len(caps) and caps[i] else 1.0, 0.3, 1.0)
             c.world_cap = _clamp(float(speed_cap or 1.0), 0.2, 1.0)
@@ -104,6 +113,9 @@ class SimEnv:
                     self._place(c, start[0], start[1], start[2])
             c.risk = c.impact_risk = 0.0
             c.touched = {}
+            if self.rolling > 0:   # a rolling start: already moving, straight ahead
+                c.speed = self.rolling * sim.MAX_SPEED * c.cap_k
+                c.vx, c.vy, c.dir = math.cos(c.angle) * c.speed, math.sin(c.angle) * c.speed, c.angle
         W.frame_no, W.touch = 0, {}
         for c in cars:
             c.sense(W)

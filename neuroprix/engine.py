@@ -40,6 +40,13 @@ YAW_K, DRIFT_SCRUB, SLIDE_GRIP = 1.6, 0.015, 0.7   # drift: the body turns up to
                                                  # grip (SLIDE_GRIP of it once sliding 0.4 rad); sliding costs DRIFT_SCRUB x |sin(slip)|
 WHEELBASE, MAX_STEER = 12.0, 0.6   # N3 bicycle: rear axle to front axle, front-wheel angle at full lock
 CAR_R, RADAR_RANGE, RADAR_SLOTS = 5, 200, 2
+# The sector radar (brain kinds 8-11, docs/sector-radar.md): the nearest car in each of 8 sectors round the car, all the
+# way round, 4 numbers each (seen, near, closing, sideways). Sectors by bearing from the nose (+ = right): front +-15 deg,
+# front diagonals to 60, sides to 120, rear diagonals to 160, rear the last 40. Chosen by comparing |ly| with lx times
+# these tangents (exact literals, the same in game/index.html), never by atan2, so both engines agree on a boundary.
+SECTORS, SECTOR_INPUTS = 8, 4
+TAN15, TAN60, TAN20 = 0.2679491924311227, 1.7320508075688772, 0.36397023426620234
+EMPTY_SECTOR = [0, 0, 0.5, 0.5]
 CONTACT_SLOWDOWN = 0.5
 # damage (every tier): walls, rocks and other cars cost health instead of ending the race (see PHYS in the browser)
 WALL_DAMAGE, CAR_DAMAGE, BOUNCE_KEEP, DEFLECT, STALL_FRAMES = 1.3, 0.5, 0.45, 0.5, 600   # head-on at top speed: a total loss
@@ -173,6 +180,23 @@ PIT_BEFORE, PIT_AFTER, PIT_BOX = 360.0, 340.0, 90.0   # px: the lane's start bef
 PIT_GAP, PIT_HALF, PIT_MERGE = 26.0, 16.0, 110.0      # px: lane centre beyond the road's edge, its half width; the merges
 PIT_SPEED = 0.4 * MAX_SPEED                           # the lane's speed limit
 PIT_BASE_S, PIT_REPAIR_S = 2.0, 6.0                   # seconds at the box: 2, plus up to 6 to repair a wreck to new
+# The limit holds between two lines: a car brakes steadily from the lane's mouth to reach it at the entry line (PIT_IN
+# px in), and only speeds up again past the exit line (PIT_OUT px before the lane's end); it slows gently into its box.
+PIT_IN, PIT_OUT, PIT_BOX_BRAKE = 160.0, 160.0, 0.5 * BRAKE
+
+
+def pit_speed(state: int, u: float, v: float, v0: float, u0: float, lane: dict, top: float) -> float:
+    """A car's speed this frame in the pit lane (state 1 to the box, 3 leaving): u along the lane, v its speed now, v0
+    and u0 its speed and place where it turned in, top its top speed. Mirrors pitSpeed in game/index.html."""
+    if state == 1:
+        if u < PIT_IN and v0 > PIT_SPEED:   # braking steadily to the limit by the entry line
+            v = math.sqrt(PIT_SPEED ** 2 + (v0 ** 2 - PIT_SPEED ** 2) * max(0.0, PIT_IN - u) / max(1.0, PIT_IN - u0))
+        else:
+            v = max(PIT_SPEED, v - BRAKE) if v > PIT_SPEED else min(PIT_SPEED, v + ACCEL)
+        return min(v, math.sqrt(2 * PIT_BOX_BRAKE * max(0.0, lane["box"] - u)) + 0.05)   # (stopping at the box)
+    if u < lane["len"] - PIT_OUT:
+        return min(PIT_SPEED, v + ACCEL * 0.8)
+    return min(max(top, PIT_SPEED), v + ACCEL)   # (past the exit line: up to speed)
 
 
 def pit_lane(T) -> dict | None:
@@ -643,6 +667,10 @@ CORNER_LOOK = (30, 90, 180)
 OBS_F2C, OBS_F1C = OBS_V2 + len(CORNER_LOOK), OBS_F1 + len(CORNER_LOOK)
 # N1 (kind 7): N2's senses + the road's grade and bank at CORNER_LOOK px ahead + the tyres' load now
 OBS_N1 = OBS_F1C + 2 * len(CORNER_LOOK) + 1
+# The sector-radar generation (docs/sector-radar.md): the same senses with the 2-slot radar (12 inputs) swapped for the
+# 8-sector one (32): kinds 8 = N4, 9 = N3, 10 = N2, 11 = N1
+SECTOR_EXTRA = SECTORS * SECTOR_INPUTS - RADAR_SLOTS * 6
+OBS_N4S, OBS_N3S, OBS_N2S, OBS_N1S = OBS_F3 + SECTOR_EXTRA, OBS_F2C + SECTOR_EXTRA, OBS_F1C + SECTOR_EXTRA, OBS_N1 + SECTOR_EXTRA
 
 
 # Championship classes: N4 (steering only), N3 (+ pedals), N2 (+ battery boost and slipstream), N1 (+ hills and banked
@@ -657,23 +685,27 @@ def norm_class(c, default: str | None = None):
 
 
 def tier_of_gen(gen: int) -> str:
-    return "N1" if gen == 7 else "N2" if gen in (4, 6) else "N3" if gen in (2, 5) else "N4"
+    return "N1" if gen in (7, 11) else "N2" if gen in (4, 6, 10) else "N3" if gen in (2, 5, 9) else "N4"
 
 
 def has_pedals(gen: int) -> bool:
-    return gen in (2, 4, 5, 6, 7)
+    return gen in (2, 4, 5, 6, 7, 9, 10, 11)
 
 
 def is_f1(gen: int) -> bool:   # (the battery and boost: N2 and N1)
-    return gen in (4, 6, 7)
+    return gen in (4, 6, 7, 10, 11)
 
 
 def sees_hills(gen: int) -> bool:
-    return gen == 7
+    return gen in (7, 11)
 
 
 def sees_corners(gen: int) -> bool:
-    return gen in (5, 6, 7)
+    return gen in (5, 6, 7, 9, 10, 11)
+
+
+def sector_radar(gen: int) -> bool:   # (the 8-sector radar instead of the 2 nearest cars ahead)
+    return gen >= 8
 
 
 def corner_curv(track) -> list:
@@ -734,7 +766,8 @@ class Brain:
         h, n_in = self.w1.shape if self.w1.ndim == 2 else (0, 0)
         n_out = self.w2.shape[0] if self.w2.ndim == 2 else 0
         self.gen = {(6, 3): 1, (OBS_V2, ACTIONS_V2): 2, (OBS_F3, 3): 3, (OBS_F1, ACTIONS_F1): 4,
-                    (OBS_F2C, ACTIONS_V2): 5, (OBS_F1C, ACTIONS_F1): 6, (OBS_N1, ACTIONS_F1): 7}.get((n_in, n_out), 0)
+                    (OBS_F2C, ACTIONS_V2): 5, (OBS_F1C, ACTIONS_F1): 6, (OBS_N1, ACTIONS_F1): 7,
+                    (OBS_N4S, 3): 8, (OBS_N3S, ACTIONS_V2): 9, (OBS_N2S, ACTIONS_F1): 10, (OBS_N1S, ACTIONS_F1): 11}.get((n_in, n_out), 0)
         self.tier = tier_of_gen(self.gen)
         if (not self.gen or self.b1.shape != (h,) or self.w2.shape != (n_out, h) or self.b2.shape != (n_out,)
                 or not 1 <= h <= 512):
@@ -942,7 +975,7 @@ class Car:
         fx, fy = self.x + c * CAR_L / 2, self.y + s * CAR_L / 2
         self.sensors = [r4(self._cast(fx, fy, math.cos(self.angle + o), math.sin(self.angle + o)) / RAY_LEN) for o in RAY_ANGLES]
         if self.gen != 1:   # N4 classic has no radar
-            self.radar = world.radar_for(self)
+            self.radar = world.sectors_for(self) if sector_radar(self.gen) else world.radar_for(self)
 
     def _cast(self, x, y, dx, dy) -> float:
         T = self.track
@@ -964,8 +997,11 @@ class Car:
 
     def obs(self) -> list:
         o = list(self.sensors)
-        for k in range(RADAR_SLOTS):
-            o += self.radar[k][1] if k < len(self.radar) else EMPTY_CONTACT
+        if sector_radar(self.gen):   # 8 sectors x 4 (World.sectors_for)
+            o += self.radar if self.radar else EMPTY_SECTOR * SECTORS
+        else:
+            for k in range(RADAR_SLOTS):
+                o += self.radar[k][1] if k < len(self.radar) else EMPTY_CONTACT
         o.append(r4(self.speed / MAX_SPEED))
         if has_pedals(self.gen):
             o.append(r4((self.steer + 1) / 2))
@@ -1136,6 +1172,7 @@ class Car:
             return False
         x, y, nx, ny = point_at(T.pts, T.S, T.L, pos)
         self.pit, self.pit_call, self.pit_u, self.pit_u0, self.pit_d0 = 1, False, u, u, self.distance
+        self.pit_v0 = self.speed
         self.pit_lat0 = (self.x - x) * nx + (self.y - y) * ny
         self.boosting = self.braking = False
         return True
@@ -1164,9 +1201,10 @@ class Car:
         teammate leaves ("double stacking"), then is serviced. Mirrors Car.pitFrame in the browser."""
         T, ox, oy = self.track, self.x, self.y
         u, v = self.pit_u, self.speed
+        self.braking = False
         if self.pit == 1:
-            v = max(PIT_SPEED, v - BRAKE) if v > PIT_SPEED else min(PIT_SPEED, v + ACCEL)
-            v = min(v, math.sqrt(2 * BRAKE * max(0.0, lane["box"] - u)) + 0.05)   # (stopping at the box)
+            v = pit_speed(1, u, v, getattr(self, "pit_v0", v), self.pit_u0, lane, self.top_speed())
+            self.braking = v < self.speed - 1e-6   # (brake lights on, down to the limit and into the box)
             u += v
             if u >= lane["box"]:
                 u, v = lane["box"], 0.0
@@ -1187,7 +1225,7 @@ class Car:
                 if is_f1(self.gen):
                     self.battery = 1.0
         else:
-            v = min(PIT_SPEED, v + ACCEL)
+            v = pit_speed(3, u, v, 0.0, 0.0, lane, self.top_speed())
             u = min(lane["len"], u + v)
         self.speed, self.pit_u = v, u
         x, y, nx, ny = point_at(T.pts, T.S, T.L, lane["s0"] + u)
@@ -1300,18 +1338,20 @@ class Car:
         self.dir = math.atan2(rvy, rvx) if math.hypot(rvx, rvy) > 1e-6 else self.angle
 
     def pose(self) -> list:
-        """[x, y, angle, distance, health] per recorded step; cars with pedals add [battery, boosting, braking]
-        (battery null and boosting 0 for N3)."""
+        """[x, y, angle, distance, health, battery, boosting, braking, pit, action] per recorded step. Every car has all ten:
+        battery is null below N2, boosting 0 below N2 (null for N4), braking null for N4 (no pedals: the viewers work it
+        out from the motion), pit 0 out of the pit lane (1 to the box, 2 at it, 3 leaving, 4 waiting for a teammate), and
+        action the move the brain chose for this step (pedal * 3 + steer; N4: 0 left, 1 straight, 2 right): the cockpit
+        view turns the wheel and presses the pedals with it."""
         p = [round(self.x, 1), round(self.y, 1), round(self.angle, 3), round(self.max_distance, 1), round(self.health, 3)]
         if is_f1(self.gen):   # N2: battery and whether it's boosting (for the broadcast's battery bars and boost glow)
             p += [round(self.battery, 3), 1 if self.boosting else 0]
         elif has_pedals(self.gen):
             p += [None, 0]
-        if has_pedals(self.gen):   # on the brake (brake lights and tyre squeal in the broadcast)
-            p.append(1 if self.braking else 0)
-        if self.pit:   # in the pit lane (races): 1 to the box, 2 at it, 3 leaving
-            p += [None, 0, 0][len(p) - 5:] if len(p) < 8 else []
-            p.append(self.pit)
+        else:
+            p += [None, None]
+        p.append((1 if self.braking else 0) if has_pedals(self.gen) else None)   # on the brake (brake lights, tyre squeal)
+        p += [self.pit or 0, int(self.action) if self.frames else 1]   # (on the grid, before its first decision: straight)
         return p
 
 
@@ -1447,3 +1487,43 @@ class World:
                 consider(o.x, o.y, 0 if o.dead else o.vx, 0 if o.dead else o.vy, True)
         out.sort(key=lambda t: t[0])
         return out[:RADAR_SLOTS]
+
+    def sectors_for(self, car: Car) -> list:
+        """The sector radar (kinds 8-11): for each of the 8 sectors (front, front-left, left, rear-left, rear, rear-right,
+        right, front-right), the nearest car whose centre is in it within RADAR_RANGE: seen, near (1 - distance / range),
+        closing (0.5 + how fast the distance shrinks / 2 top speeds) and sideways (0.5 + its velocity relative to this
+        car across its axis, + = right / 2 top speeds). An empty sector reads EMPTY_SECTOR. Flat: 32 numbers.
+        Mirrors World.sectorsFor in the browser (docs/sector-radar.md)."""
+        c, s, R = math.cos(car.angle), math.sin(car.angle), RADAR_RANGE
+        best = [None] * SECTORS
+        for o in self.cars:
+            if o is car or o.finished or o.pit or o.lifted:
+                continue
+            dx, dy = o.x - car.x, o.y - car.y
+            lx, ly = dx * c + dy * s, -dx * s + dy * c
+            d = math.hypot(lx, ly)
+            if d > R:
+                continue
+            ay = abs(ly)
+            if lx > 0 and ay <= lx * TAN15:
+                k = 0                                  # front
+            elif lx > 0 and ay <= lx * TAN60:
+                k = 1 if ly < 0 else 7                 # front-left / front-right
+            elif lx < 0 and ay <= -lx * TAN20:
+                k = 4                                  # rear
+            elif lx < 0 and ay <= -lx * TAN60:
+                k = 3 if ly < 0 else 5                 # rear-left / rear-right
+            else:
+                k = 2 if ly < 0 else 6                 # left / right
+            if best[k] is not None and best[k][0] <= d:
+                continue
+            ovx, ovy = (0, 0) if o.dead else (o.vx, o.vy)
+            rvx, rvy = ovx - car.vx, ovy - car.vy
+            closing = -(dx * rvx + dy * rvy) / d if d > 0 else 0.0
+            vl = -rvx * s + rvy * c
+            best[k] = (d, [1, r4(min(1, max(0, 1 - d / R))), r4(min(1, max(0, closing / (2 * MAX_SPEED) + 0.5))),
+                           r4(min(1, max(0, vl / (2 * MAX_SPEED) + 0.5)))])
+        out = []
+        for b in best:
+            out += b[1] if b is not None else EMPTY_SECTOR
+        return out

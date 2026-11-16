@@ -40,8 +40,8 @@ import torch.nn.functional as F
 from torch.distributions import Categorical
 
 from neuroprix.browser_env import RaceEnv, load_track_spec
-from neuroprix.env import SimEnv
-from neuroprix.brain import GEN_OF_SHAPE, LEGACY, N_HIDDEN, PEDALS, TIER_OF_GEN, TIERS, RaceBrain, generation, load_weights, save_brain, state_to_obs  # noqa: E402
+from neuroprix.env import SimEnv, sim   # (sim: the race engine)
+from neuroprix.brain import GEN_OF_SHAPE, LEGACY, N_HIDDEN, PEDALS, SENSES, TIER_OF_GEN, TIERS, RaceBrain, generation, load_weights, save_brain, state_to_obs, to_sectors  # noqa: E402
 
 # Rewards (per step of 4 frames). Further along the track is a better episode.
 # A step with no new best distance pays R_IDLE. A step that advances pays for every
@@ -122,11 +122,12 @@ class TrainPolicy(nn.Module):
     and pedal (N3: 3; N2: 4, with boost), each with its own exploration, so braking keeps getting tried. Exported as a
     plain RaceBrain: the 9 (N3) or 12 (N2) outputs are steer + pedal logits summed (the same distribution, the same argmax)."""
 
-    def __init__(self, tier: str):
+    def __init__(self, tier: str, senses: str = "slots"):
         super().__init__()
         self.tier = tier
+        self.shape = SENSES[senses][tier]   # (today's radar, or the sector radar: docs/sector-radar.md)
         self.pedals = PEDALS.get(tier, 0)
-        n_in, _ = TIERS[tier]
+        n_in, _ = self.shape
         self.fc1 = nn.Linear(n_in, N_HIDDEN)
         self.head = nn.Linear(N_HIDDEN, 3 + self.pedals)
 
@@ -153,7 +154,7 @@ class TrainPolicy(nn.Module):
         return d[0].log_prob(a), d[0].entropy()
 
     def export(self) -> RaceBrain:
-        n_in, n_out = TIERS[self.tier]
+        n_in, n_out = self.shape
         rb = RaceBrain(n_in, N_HIDDEN, n_out)
         with torch.no_grad():
             rb.fc1.load_state_dict(self.fc1.state_dict())
@@ -232,24 +233,36 @@ def _write_traces(job: dict, spec: dict, traces: list[dict]) -> None:
 
 def collect(job: dict) -> dict:
     """Play some episodes with the given weights. Returns trajectories as plain lists (cheap to send)."""
-    tier, gen = job["tier"], GEN_OF_SHAPE[TIERS[job["tier"]]]
-    policy, critic = TrainPolicy(tier), Critic(TIERS[tier][0])
+    tier, senses = job["tier"], job.get("senses", "slots")
+    policy = TrainPolicy(tier, senses)
+    gen, critic = GEN_OF_SHAPE[policy.shape], Critic(policy.shape[0])
     policy.load_state_dict(job["policy"])
     critic.load_state_dict(job["critic"])
     random.seed(job["seed"])
     torch.manual_seed(job["seed"])
+    rng = random.Random(job["seed"] + 1)   # (the league drivers' race temperature)
+    pool = _league(job.get("league") or [])
     out, contacts, damage, walls, passes, lost = [], 0, 0.0, 0, 0, 0
     rw = job["rewards"]
     for spec in job["specs"]:
         n_cars = job["cars"]
+        # league opponents: some cars driven by other drivers' frozen brains (each sensing with its own kind), drawn
+        # afresh each episode; they're traffic, not learners
+        n_league = min(job.get("league_cars", 0), n_cars - 1, len(pool)) if pool and n_cars > 1 else 0
+        league = dict(zip(random.sample(range(n_cars), n_league), random.sample(pool, n_league))) if n_league else {}
         # slower traffic: a few copies held to a lower top speed, so there's someone to overtake. They drive the same
         # brain but their experience isn't learned from (it would teach blocking, not racing).
-        n_slow = min(job.get("slow_traffic", SLOW_TRAFFIC), n_cars - 1) if n_cars > 1 else 0
-        slow = set(random.sample(range(n_cars), n_slow)) if n_slow > 0 else set()
+        n_slow = min(job.get("slow_traffic", SLOW_TRAFFIC), n_cars - 1 - n_league) if n_cars > 1 else 0
+        slow = set(random.sample([i for i in range(n_cars) if i not in league], n_slow)) if n_slow > 0 else set()
         base = job.get("slow_speed", SLOW_SPEED)
         caps = [round(min(1.0, max(0.3, base + random.uniform(-0.05, 0.05))), 3) if i in slow else 1.0 for i in range(n_cars)]
-        _ENV.setup_world(spec, n_cars, random_start=True, tier=tier, speed_cap=job.get("speed_cap", 1.0),
-                         fragile=job.get("fragile", False), caps=caps)   # exploring starts
+        start, rolling = _start_mode(job.get("starts")), 0.0
+        if start == "rolling":
+            rolling = round(random.uniform(0.5, 0.8), 3)
+        _ENV.setup_world(spec, n_cars, random_start=start != "grid", tier=tier, speed_cap=job.get("speed_cap", 1.0),
+                         fragile=job.get("fragile", False), caps=caps, gen=gen,
+                         gens=[league[i].gen if i in league else gen for i in range(n_cars)], rolling=rolling)
+        slow |= set(league)   # (nobody learns from a league car's moves either)
         states = _ENV.reset_world()
         n = len(states)
         last_touch = [[-10**6] * n for _ in range(n)]   # step when each pair last touched
@@ -264,12 +277,19 @@ def collect(job: dict) -> dict:
             live = [i for i, s in enumerate(states) if not (s["dead"] or s["finished"])]
             if not live:
                 break
-            obs = torch.stack([state_to_obs(states[i], gen) for i in live])
+            actions = [0] * n
+            for i in live:
+                if i in league:
+                    actions[i] = league[i].act(states[i]["obs"])
+            mine = [i for i in live if i not in league]
+            if not mine:
+                states = _ENV.step_world(actions)
+                continue
+            obs = torch.stack([state_to_obs(states[i], gen) for i in mine])
             with torch.no_grad():
                 a, lp = policy.sample(obs)
                 v = critic(obs)
-            actions = [0] * n
-            for k, i in enumerate(live):
+            for k, i in enumerate(mine):
                 actions[i] = int(a[k])
                 t = traj[i]
                 t["obs"].append(obs[k].tolist()); t["act"].append(int(a[k])); t["logp"].append(float(lp[k])); t["val"].append(float(v[k]))
@@ -278,9 +298,12 @@ def collect(job: dict) -> dict:
                 for j in nxt[i].get("touched", []):
                     if 0 <= j < n:
                         last_touch[i][j] = last_touch[j][i] = step
-            for i in live:
+            for i in mine:
                 left = job["max_steps"] - step - 1
                 traj[i]["rew"].append(reward_for(states[i], nxt[i], rw, left, gamma))
+                if job.get("contact_blame") and nxt[i].get("contacts"):   # the car that caused a touch pays more for it
+                    k = max([contact_blame(states[i], states[j]) for j in nxt[i].get("touched", []) if 0 <= j < n and j != i] or [1.0])
+                    traj[i]["rew"][-1] += (k - 1) * rw["contact"] * nxt[i]["contacts"]
                 # places gained and lost on nearby cars that are still racing; a pass only counts if it was clean
                 if rw.get("overtake") and not nxt[i]["dead"]:
                     for j in range(n):
@@ -314,6 +337,46 @@ def collect(job: dict) -> dict:
         _write_traces(job, spec, traces)
         out += [t for i, t in enumerate(traj) if t["obs"] and i not in slow]
     return {"traj": out, "contacts": contacts, "damage": damage, "walls": walls, "passes": passes, "lost": lost}
+
+
+_LEAGUE: dict = {}   # (each worker: league brains, loaded once)
+
+
+def _league(paths: list) -> list:
+    """The league's frozen brains (the engine's Brain: the forward pass races use), at race temperature."""
+    out = []
+    for p in paths:
+        if p not in _LEAGUE:
+            b = sim.Brain(json.loads(Path(p).read_text()))
+            b.temperature, b.rng = 0.2, random.Random(hash(p) & 0xFFFF)
+            _LEAGUE[p] = b
+        out.append(_LEAGUE[p])
+    return out
+
+
+def _start_mode(starts) -> str:
+    """One episode's start (--starts): "grid" (standing, on the race grid at the line), "rolling" (the grid somewhere
+    round the circuit, already moving) or "random" (standing, the grid somewhere round the circuit: the default)."""
+    if not starts:
+        return "random"
+    r, acc = random.random() * sum(w for _, w in starts), 0.0
+    for mode, w in starts:
+        acc += w
+        if r < acc:
+            return mode
+    return starts[-1][0]
+
+
+def contact_blame(me: dict, other: dict) -> float:
+    """How much of a touch was this car's doing (--contact-blame), from the two cars just before it: the car behind that
+    was closing in 1.5 (it had the choice), the car hit from behind 0.5, side by side (within half a car length along
+    the circuit) or anything else 1. Its contact penalty is multiplied by this."""
+    gap = other["distance"] - me["distance"]
+    if abs(gap) < 9:
+        return 1.0
+    if gap > 0:
+        return 1.5 if me["speed"] > other["speed"] else 1.0
+    return 0.5 if other["speed"] > me["speed"] else 1.0
 
 
 def gae(t: dict, gamma: float, lam: float):
@@ -367,7 +430,7 @@ def driving_lessons(policy, env, tier: str, rounds: int, specs: list, random_tra
     most likely choice. Copying only the most likely choice turned a young driver's steering into "always straight"
     (it turned by sometimes picking a turn, not because turning was its top choice), and it never steered again.
     From the second round, half the time it uses its own pedals, so it also learns what to do after its own mistakes."""
-    gen = GEN_OF_SHAPE[TIERS[tier]]
+    gen = GEN_OF_SHAPE[policy.shape]
     teacher = TrainPolicy(tier); teacher.load_state_dict(policy.state_dict())   # its steering, as it was
     opt = torch.optim.Adam(policy.parameters(), lr=1e-3)
     O, PED, STEER = [], [], []   # STEER: the driver's own steering probabilities before the lessons
@@ -412,13 +475,12 @@ def driving_lessons(policy, env, tier: str, rounds: int, specs: list, random_tra
 
 
 # ---------- evaluation ----------
-def _pose(s: dict) -> list:
-    """One replay step: x, y, heading and health (so the replay shows damage, smoke and fire); cars with pedals add
-    whether they're on the brake (brake lights and tyre squeal in the replay)."""
-    p = [round(s["x"], 1), round(s["y"], 1), round(s["angle"], 3), round(s.get("health", 1.0), 3)]
-    if "braking" in s:
-        p.append(1 if s["braking"] else 0)
-    return p
+def _pose(s: dict, act: int | None = None) -> list:
+    """One replay step: [x, y, heading, health, braking, action]: health so the replay shows damage, smoke and fire;
+    braking (null without pedals) for brake lights and tyre squeal; action the move it chose for this step (null on the
+    first), for the Train page's cockpit view (game/trainer.js pose)."""
+    return [round(s["x"], 1), round(s["y"], 1), round(s["angle"], 3), round(s.get("health", 1.0), 3),
+            (1 if s["braking"] else 0) if "braking" in s else None, act]
 
 
 def _drive(env, model, gen, tier, spec, cars, max_steps, record=None, others=None):
@@ -426,7 +488,7 @@ def _drive(env, model, gen, tier, spec, cars, max_steps, record=None, others=Non
     randomness (identical deterministic cars would just pile into each other). Returns car 0's end state,
     the race length in px and car 0's touches. record: car 0's path; others: the other cars' paths and how
     each one ended (for the replay on the Train page)."""
-    info = env.setup_world(spec, cars, tier=tier)
+    info = env.setup_world(spec, cars, tier=tier, gen=gen)
     states = env.reset_world()
     n, touches, steps, walls = len(states), 0, 0, 0
     if others is not None:
@@ -447,12 +509,12 @@ def _drive(env, model, gen, tier, spec, cars, max_steps, record=None, others=Non
         walls += states[0].get("hits", 0)
         steps += 1
         if record is not None:
-            record.append(_pose(states[0]))
+            record.append(_pose(states[0], acts[0]))
         if others is not None:
             for k in live:
                 if k > 0:
                     o = others[k - 1]
-                    o["path"].append(_pose(states[k]))
+                    o["path"].append(_pose(states[k], acts[k]))
                     o["finished"], o["reason"] = states[k]["finished"], states[k]["reason"] or ""
     info["walls"] = walls   # (frames car 0 spent touching a wall or rock)
     return states[0], info, touches, steps
@@ -561,7 +623,15 @@ def main() -> None:
     ap.add_argument("--random-tracks", action="store_true", help="fresh procedural circuit every episode")
     ap.add_argument("--tier", type=str.lower, choices=["n4", "n3", "n2", "n1"], default="n3",
                     help="n4: steering only (fast to train); n3: steering + pedals; n2: + battery boost and slipstream inputs")
-    ap.add_argument("--traffic", type=int, default=4, help="cars per episode, all driven by this driver (1 = alone)")
+    ap.add_argument("--traffic", type=int, default=4, help="cars per episode, all driven by this driver (1 = alone; at most 10)")
+    ap.add_argument("--senses", choices=["slots", "sectors"], default="slots",
+                    help="the radar: today's (the 2 nearest cars ahead) or the 8-sector one all round (a new brain kind: "
+                         "docs/sector-radar.md). Resuming a today's brain with 'sectors' moves it to the new kind")
+    ap.add_argument("--starts", default="", help="each episode's start, weighted, e.g. grid:0.4,rolling:0.3,random:0.3 "
+                    "(grid: standing at the line; rolling: moving, somewhere round; random: standing, somewhere round; default random)")
+    ap.add_argument("--league", action="append", default=[], help="league opponents: brain .json files or folders of them (repeatable)")
+    ap.add_argument("--league-cars", type=int, default=0, help="cars per episode driven by league brains (not learned from)")
+    ap.add_argument("--contact-blame", action="store_true", help="a touch costs the car that caused it 1.5x, the car hit 0.5x")
     ap.add_argument("--updates", type=int, default=150, help="policy updates")
     ap.add_argument("--batch", type=int, default=8, help="episodes (fields of cars) per update")
     ap.add_argument("--max-steps", type=int, default=400, help="step cap per practice episode (1 step = 4 frames)")
@@ -648,7 +718,17 @@ def main() -> None:
     torch.set_num_threads(1)
     random.seed(args.seed)
     torch.manual_seed(args.seed)
-    cars = max(1, min(8, args.traffic))
+    cars = max(1, min(10, args.traffic))
+    starts = []
+    for part in filter(None, (p.strip() for p in args.starts.split(","))):
+        mode, _, w = part.partition(":")
+        if mode not in ("grid", "rolling", "random"):
+            sys.exit(f"--starts: unknown start '{mode}' (grid, rolling or random)")
+        starts.append((mode, float(w or 1)))
+    league = []
+    for item in args.league:
+        p = Path(item)
+        league += sorted(str(q) for q in p.glob("*.json")) if p.is_dir() else [str(p)]
     specs = [load_track_spec(t) for t in args.track] + [{"seed": int(s)} for s in args.seeds.split(",") if s.strip()]
     if not specs and not args.random_tracks:
         specs = [{"seed": 1}]
@@ -680,13 +760,25 @@ def main() -> None:
             return 1.0
         return round(args.learner_start + (1 - args.learner_start) * min(1.0, (update - 1) / args.learner_updates), 3)
     tier = args.tier
-    policy, critic = TrainPolicy(tier), Critic(TIERS[tier][0])
+    if args.resume and args.senses == "slots":   # a brain that already has the sector radar keeps it
+        try:
+            w = load_weights(args.resume)["fc1.weight"]
+            if (w.shape[1], load_weights(args.resume)["fc2.weight"].shape[0]) == SENSES["sectors"][tier]:
+                args.senses = "sectors"
+        except (ValueError, KeyError):
+            pass   # (reported below)
+    policy = TrainPolicy(tier, args.senses)
+    critic = Critic(policy.shape[0])
     if args.resume:
         try:
             sd = load_weights(args.resume)
         except ValueError as e:
             sys.exit(f"--resume: {e}")
         shape = (sd["fc1.weight"].shape[1], sd["fc2.weight"].shape[0])
+        if args.senses == "sectors" and shape == TIERS[tier] and sd["fc1.weight"].shape[0] == N_HIDDEN:
+            sd, shape = to_sectors(sd), policy.shape   # today's radar -> the sector radar (docs/sector-radar.md, section 5)
+            say("moving the brain to the sector radar: its old radar dropped, 8 sectors all round starting switched off",
+                event="note", message="moved the brain to the sector radar")
         if shape == LEGACY.get(tier) and sd["fc1.weight"].shape[0] == N_HIDDEN:
             # an earlier brain of this class, without the corner-ahead sense: add those inputs switched off, so it drives
             # exactly as before and learns to use them from here
@@ -694,7 +786,7 @@ def main() -> None:
             sd = {**sd, "fc1.weight": torch.cat([sd["fc1.weight"], torch.zeros(N_HIDDEN, extra)], 1)}
             say(f"upgrading the brain: {extra} new inputs (the corners ahead), starting switched off", event="note",
                 message="upgraded the brain with the corner-ahead sense")
-        if (sd["fc1.weight"].shape[1], sd["fc2.weight"].shape[0]) != TIERS[tier] or sd["fc1.weight"].shape[0] != N_HIDDEN:
+        if (sd["fc1.weight"].shape[1], sd["fc2.weight"].shape[0]) != policy.shape or sd["fc1.weight"].shape[0] != N_HIDDEN:
             sys.exit(f"--resume needs a {tier.upper()} brain; other brains start a new one from scratch")
         policy.load_brain(sd)
         if policy.pedals and args.reopen_pedals < 1:   # a driver that stopped trying the brake (or boost) never learns it
@@ -792,7 +884,8 @@ def main() -> None:
                                                           if args.start_margin else "") + "  <- saved",
                 event="eval", update=0, progress=round(max(0.0, score), 4), saved=True, results=res, path=path, preview=preview)
         if args.resume:
-            stage("Racing practice" + (": racing copies of itself, with a slower car to overtake" if cars > 1 and args.slow_traffic > 0
+            stage("Racing practice" + (": racing other drivers and copies of itself" if cars > 1 and league and args.league_cars > 0
+                                       else ": racing copies of itself, with a slower car to overtake" if cars > 1 and args.slow_traffic > 0
                                        else ": racing copies of itself" if cars > 1 else ""))
         for update in range(1, args.updates + 1):
             if update > 1 and speed_cap(update) >= 1 > speed_cap(update - 1):
@@ -806,7 +899,9 @@ def main() -> None:
                      "max_steps": args.max_steps, "seed": random.randrange(2**31), "update": update,
                      "log_dir": args.log_dir,
                      "rewards": rewards, "speed_cap": speed_cap(update), "fragile": update <= args.first_lessons,
-                     "gamma": args.gamma, "slow_traffic": args.slow_traffic, "slow_speed": args.slow_speed} for w in range(workers)]
+                     "gamma": args.gamma, "slow_traffic": args.slow_traffic, "slow_speed": args.slow_speed,
+                     "senses": args.senses, "starts": starts, "league": league, "league_cars": args.league_cars,
+                     "contact_blame": args.contact_blame} for w in range(workers)]
             parts = gather([j for j in jobs if j["specs"]])
             trajs = [t for p in parts for t in p["traj"]]
             contacts = sum(p["contacts"] for p in parts)
@@ -861,7 +956,7 @@ def main() -> None:
 
         say(f"\nBest score on training tracks: {best:.2f} -> {args.out}", event="trained", best=round(max(0.0, best), 4))
         if holdout and Path(args.out).exists():
-            n_in, n_out = TIERS[tier]
+            n_in, n_out = policy.shape
             best_model = RaceBrain(n_in, N_HIDDEN, n_out)
             best_model.load_state_dict(load_weights(Path(args.out).with_suffix(".json")))
             _, res = evaluate(env, best_model, holdout, cars, 3000)

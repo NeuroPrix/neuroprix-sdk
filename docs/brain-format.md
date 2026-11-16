@@ -41,3 +41,8 @@ The rules:
 
 Older brains of a class (kind 2 for N3, 4 for N2: before the corner-ahead sense) still race; the default trainer
 upgrades them when it continues them (the new inputs start switched off).
+
+The sector-radar generation (see [what a driver senses](observations-and-actions.md#the-sector-radar-the-next-generation-of-brain))
+has 20 more inputs in each class: N4 38 inputs (kind 8), N3 42 (kind 9), N2 44 (kind 10), N1 51 (kind 11), with the same
+hidden layer and actions. A class races one kind at a time: the server accepts the sector-radar kind for a class once
+that class has moved to it.
