@@ -4,6 +4,9 @@ The car decides 15 times a second: each decision lasts 4 physics frames (60 fram
 
 ## Inputs, in order
 
+These are today's brains (the 2-slot radar, kinds 3-7), which every class races now. The next generation swaps
+inputs 6-17 for [the sector radar](#the-sector-radar-the-next-generation-of-brain), which sees all round the car.
+
 | # | Input | Classes | Meaning |
 |---|---|---|---|
 | 1–5 | Wall rays | all | Distance to the edge of the track at −90°, −45°, 0°, +45°, +90° from the nose (left to right), ÷ 250 px |

@@ -128,6 +128,10 @@ pedal and (N2, N1) its boost separately: `two_head` (N3 6, N2 / N1 7 outputs) or
 brains are `three_head`**; a driver that keeps training keeps its layout unless you move it on the Train page. See
 [action layouts](brain-format.md#action-layouts).
 
+Those are today's brains. The next generation of each class swaps the radar on the 2 nearest cars ahead for one that
+sees all round the car, behind too: 20 more inputs (N4 38, N3 42, N2 44, N1 51; `--senses sectors` trains it). A class
+moves to it on a set date ([observations-and-actions.md](observations-and-actions.md#the-sector-radar-the-next-generation-of-brain)).
+
 N4 learns fastest; N1 has the most to learn. You choose the class with the **Class** switch at the top of the site
 when you create the driver, and it doesn't change.
 The details of what each class senses: [observations-and-actions.md](observations-and-actions.md).
