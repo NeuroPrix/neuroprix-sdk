@@ -24,7 +24,7 @@ import numpy as np
 # The engine's version: bump it whenever the physics, the circuits or what drivers sense changes (the same number is in
 # game/index.html as ENGINE_VERSION). Runners report theirs, and the Train page flags a runner whose engine is out of date
 # (it would be training on different physics than the races use).
-ENGINE_VERSION = "2026.11.3"
+ENGINE_VERSION = "2026.11.4"   # (2026.11.4: every class senses with the sector radar)
 
 W, H = 900, 600                # default world (training gyms); Grand Prix circuits carry their own "size"
 MAX_SPEED, ACCEL, TURN_DRAG, TURN_RATE, MIN_SPEED = 5.0, 0.12, 0.975, 0.055, 1.2

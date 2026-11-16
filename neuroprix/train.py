@@ -129,12 +129,12 @@ class TrainPolicy(nn.Module):
     A training action is the heads' choices in mixed radix (steer + 3 x pedal [+ 9 x boost]); env_action turns it into
     the car's action."""
 
-    def __init__(self, tier: str, senses: str = "slots", layout: str | None = None):
+    def __init__(self, tier: str, senses: str = "sectors", layout: str | None = None):
         super().__init__()
         self.tier = tier
         self.layout = layout or "combined"   # (what the exported brain declares)
         self.pedals = PEDALS.get(tier, 0)
-        n_in = SENSES[senses][tier][0]   # (today's radar, or the sector radar: docs/sector-radar.md)
+        n_in = SENSES[senses][tier][0]   # (the sector radar, docs/sector-radar.md; "slots": the earlier 2-slot radar)
         n_out = layout_outputs(tier, self.layout)
         if n_out is None:
             raise ValueError(f"the {self.layout} action layout isn't available in {tier.upper()}")
@@ -266,7 +266,7 @@ def _write_traces(job: dict, spec: dict, traces: list[dict]) -> None:
 
 def collect(job: dict) -> dict:
     """Play some episodes with the given weights. Returns trajectories as plain lists (cheap to send)."""
-    tier, senses = job["tier"], job.get("senses", "slots")
+    tier, senses = job["tier"], job.get("senses", "sectors")
     policy = TrainPolicy(tier, senses, job.get("layout"))
     gen, critic = policy.gen, Critic(policy.shape[0])
     policy.load_state_dict(job["policy"])
@@ -659,9 +659,10 @@ def main() -> None:
     ap.add_argument("--tier", type=str.lower, choices=["n4", "n3", "n2", "n1"], default="n3",
                     help="n4: steering only (fast to train); n3: steering + pedals; n2: + battery boost and slipstream inputs")
     ap.add_argument("--traffic", type=int, default=4, help="cars per episode, all driven by this driver (1 = alone; at most 10)")
-    ap.add_argument("--senses", choices=["slots", "sectors"], default="slots",
-                    help="the radar: today's (the 2 nearest cars ahead) or the 8-sector one all round (a new brain kind: "
-                         "docs/sector-radar.md). Resuming a today's brain with 'sectors' moves it to the new kind")
+    ap.add_argument("--senses", choices=["slots", "sectors"], default="sectors",
+                    help="the radar: 8 sectors all round the car (the default, docs/sector-radar.md) or the earlier one "
+                         "on the 2 nearest cars ahead (slots: for experiments). A resumed 2-slot brain is moved to the "
+                         "sector radar, keeping everything else it learned")
     ap.add_argument("--starts", default="", help="each episode's start, weighted, e.g. grid:0.4,rolling:0.3,random:0.3 "
                     "(grid: standing at the line; rolling: moving, somewhere round; random: standing, somewhere round; default random)")
     ap.add_argument("--league", action="append", default=[], help="league opponents: brain .json files or folders of them (repeatable)")
@@ -823,6 +824,14 @@ def main() -> None:
         except ValueError as e:
             sys.exit(f"--resume: {e}")
         shape = (sd["fc1.weight"].shape[1], sd["fc2.weight"].shape[0])
+        if shape == LEGACY.get(tier) and sd["fc1.weight"].shape[0] == N_HIDDEN:
+            # an earlier brain of this class, without the corner-ahead sense: add those inputs switched off, so it drives
+            # exactly as before and learns to use them from here
+            extra = TIERS[tier][0] - shape[0]
+            sd = {**sd, "fc1.weight": torch.cat([sd["fc1.weight"], torch.zeros(N_HIDDEN, extra)], 1)}
+            shape = TIERS[tier]   # (then on to the sector radar, below)
+            say(f"upgrading the brain: {extra} new inputs (the corners ahead), starting switched off", event="note",
+                message="upgraded the brain with the corner-ahead sense")
         if args.senses == "sectors" and shape == TIERS[tier] and sd["fc1.weight"].shape[0] == N_HIDDEN:
             sd = to_sectors(sd)   # today's radar -> the sector radar (docs/sector-radar.md, section 5)
             shape = (policy.shape[0], shape[1])
@@ -836,13 +845,6 @@ def main() -> None:
             shape = (shape[0], sd["fc2.weight"].shape[0])
             say(f"moving the brain's choices to the {policy.layout} action layout", event="note",
                 message=f"moved the brain to the {policy.layout} action layout")
-        if shape == LEGACY.get(tier) and sd["fc1.weight"].shape[0] == N_HIDDEN:
-            # an earlier brain of this class, without the corner-ahead sense: add those inputs switched off, so it drives
-            # exactly as before and learns to use them from here
-            extra = TIERS[tier][0] - shape[0]
-            sd = {**sd, "fc1.weight": torch.cat([sd["fc1.weight"], torch.zeros(N_HIDDEN, extra)], 1)}
-            say(f"upgrading the brain: {extra} new inputs (the corners ahead), starting switched off", event="note",
-                message="upgraded the brain with the corner-ahead sense")
         if (sd["fc1.weight"].shape[1], sd["fc2.weight"].shape[0]) != policy.shape or sd["fc1.weight"].shape[0] != N_HIDDEN:
             sys.exit(f"--resume needs a {tier.upper()} brain ({policy.layout} action layout); other brains start a new one from scratch")
         policy.load_brain(sd)

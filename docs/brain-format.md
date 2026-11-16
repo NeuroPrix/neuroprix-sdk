@@ -10,19 +10,19 @@ The table shows the `combined` layout (one score per action); see [action layout
 
 | Class | Inputs | Hidden | Actions | Brain kind (`generation`) |
 |---|---|---|---|---|
-| N4 | 18 | 64 | 3 | 3 |
-| N3 | 22 | 64 | 9 | 5 |
-| N2 | 24 | 64 | 12 | 6 |
-| N1 | 31 | 64 | 12 | 7 |
+| N4 | 38 | 64 | 3 | 8 |
+| N3 | 42 | 64 | 9 | 9 |
+| N2 | 44 | 64 | 12 | 10 |
+| N1 | 51 | 64 | 12 | 11 |
 
 It's sent as JSON (`brain_out`, and the starting brain in a session):
 
 ```json
 {
   "name": "Dex Jango",
-  "arch": "mlp-24-64-12",
-  "generation": 6,
-  "fc1": {"weight": [[...24 numbers...], ... 64 rows], "bias": [...64 numbers...]},
+  "arch": "mlp-44-64-12",
+  "generation": 10,
+  "fc1": {"weight": [[...44 numbers...], ... 64 rows], "bias": [...64 numbers...]},
   "fc2": {"weight": [[...64 numbers...], ... 12 rows], "bias": [...12 numbers...]}
 }
 ```
@@ -43,13 +43,10 @@ The rules:
 - How you train is up to you, but the network must be this one: you can't add layers or units. (A class may get a
   new brain shape in a future season; the SDK and the server will say so.)
 
-Older brains of a class (kind 2 for N3, 4 for N2: before the corner-ahead sense) still race; the default trainer
-upgrades them when it continues them (the new inputs start switched off).
-
-The sector-radar generation (see [what a driver senses](observations-and-actions.md#the-sector-radar-the-next-generation-of-brain))
-has 20 more inputs in each class: N4 38 inputs (kind 8), N3 42 (kind 9), N2 44 (kind 10), N1 51 (kind 11), with the same
-hidden layer and actions. A class races one kind at a time: the server accepts the sector-radar kind for a class once
-that class has moved to it.
+Earlier brains still race, each sensing what it was built for: the 2-slot radar (kinds 3 for N4, 5 for N3, 6 for N2,
+7 for N1: 18, 22, 24 and 31 inputs; [what a driver senses](observations-and-actions.md#earlier-brains-the-2-slot-radar))
+and, older still, kinds 2 and 4 (N3, N2 before the corner-ahead sense). The default trainer moves any of them to the
+sector radar when it continues them (the new inputs start switched off, so it drives as before with nobody about).
 
 ## Action layouts
 
@@ -64,7 +61,7 @@ outputs become those controls. Leave it out and it's `combined`.
 | `three_head` | 3 steering, 3 pedal (gas, coast, brake), 2 boost (off, on) = 8 | the best of each of the three on its own | N2, N1 |
 
 ```json
-{"name": "Nora Summit", "arch": "mlp-31-64-8", "generation": 7, "action_layout": "three_head", "fc1": {...}, "fc2": {...}}
+{"name": "Nora Summit", "arch": "mlp-51-64-8", "generation": 11, "action_layout": "three_head", "fc1": {...}, "fc2": {...}}
 ```
 
 - **New N1 brains are `three_head`** by default (it drove cleanest in traffic in NeuroPrix's tests). The server says

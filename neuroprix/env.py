@@ -14,7 +14,7 @@ from pathlib import Path
 
 from neuroprix import engine as sim
 
-GEN_OF_TIER = {"n4": 3, "n3": 5, "n2": 6, "n1": 7}   # each class's current brain kind (N1: hills and banking)
+GEN_OF_TIER = {"n4": 8, "n3": 9, "n2": 10, "n1": 11}   # each class's brain kind for new brains: the sector radar (docs/sector-radar.md)
 KINDS = (2, 3, 4, 5, 6, 7, 8, 9, 10, 11)              # brain kinds a training car can have (8-11: the sector radar)
 MAX_CARS = 10                                         # a training field: up to a full race grid
 

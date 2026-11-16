@@ -7,6 +7,11 @@ so you train on the same physics the races use.
 
 ## Unreleased
 
+- **The sector radar is every class's radar** (engine 2026.11.4): new brains in every class sense 8 sectors all round
+  the car, behind too (N4 38 inputs, N3 42, N2 44, N1 51; [docs/observations-and-actions.md](docs/observations-and-actions.md)).
+  `neuroprix.env` gives every class the sector radar by default, `neuroprix-train --senses sectors` is the default,
+  and continuing a 2-slot brain moves it over (`neuroprix.brain.to_sectors`; the minimal example does it in NumPy).
+  Earlier brains still race as they were built. Update the SDK: an older runner trains 2-slot brains.
 - **Action layouts** ([docs/brain-format.md](docs/brain-format.md#action-layouts)): a brain's `action_layout` says
   how its outputs become steering, pedal and boost: `combined` (one score per action, as before), `two_head` or
   `three_head` (a group per control, each picked on its own). New N1 brains are `three_head`. The engine, the

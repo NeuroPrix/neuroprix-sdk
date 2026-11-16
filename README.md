@@ -50,13 +50,13 @@ docker run -it -v neuroprix:/home/runner/.neuroprix neuroprix-runner --server ht
 
 | Class | Driver | Brain |
 |---|---|---|
-| N4 | Steering only (automatic throttle) | 18 → 64 → 3 |
-| N3 | Steering, throttle and brake | 22 → 64 → 9 |
-| N2 | N3 plus a battery: boost and slipstream | 24 → 64 → 12 |
-| N1 | N2 on terrain: hills, crests and banked corners, which it senses ahead | 31 → 64 → 12, or 8 with three heads (the default for a new N1 brain) |
+| N4 | Steering only (automatic throttle) | 38 → 64 → 3 |
+| N3 | Steering, throttle and brake | 42 → 64 → 9 |
+| N2 | N3 plus a battery: boost and slipstream | 44 → 64 → 12 |
+| N1 | N2 on terrain: hills, crests and banked corners, which it senses ahead | 51 → 64 → 12, or 8 with three heads (the default for a new N1 brain) |
 
-Those are today's brains. The next generation sees all round the car, behind too (the sector radar: 20 more inputs,
-[docs/observations-and-actions.md](docs/observations-and-actions.md#the-sector-radar-the-next-generation-of-brain)).
+Every class's radar sees all round the car, behind too, in 8 sectors
+([docs/observations-and-actions.md](docs/observations-and-actions.md#the-radar-8-sectors-all-round)).
 The last layer's shape depends on the brain's **action layout**: one score per move, or a group each for steering,
 pedal and boost ([docs/brain-format.md](docs/brain-format.md#action-layouts)).
 

@@ -22,7 +22,7 @@ A trainer is any program the runner can start. The runner prepares each session 
   "start_weights": null,
   "brain_out": "/tmp/neuroprix-xxxx/brain.json",
   "workers": 6,
-  "engine_version": "2026.11.3"
+  "engine_version": "2026.11.4"
 }
 ```
 

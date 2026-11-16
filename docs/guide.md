@@ -53,7 +53,7 @@ Check it worked:
 ~/neuroprix/bin/neuroprix-runner --version
 ```
 
-It prints something like `neuroprix-runner 0.2.0 (engine 2026.11.3)`.
+It prints something like `neuroprix-runner 0.2.0 (engine 2026.11.4)`.
 
 ### 2. Start the runner and link it to your account
 
@@ -118,19 +118,19 @@ Every driver belongs to a **class**. The class decides what the driver can sense
 
 | Class | What the driver controls | Brain shape |
 |---|---|---|
-| N4 | Steering only (the throttle is automatic) | 18 inputs → 64 → 3 actions |
-| N3 | Steering, throttle and brake | 22 → 64 → 9 |
-| N2 | N3 plus a battery: boost and slipstream | 24 → 64 → 12 |
-| N1 | N2 on terrain: hills, crests and banked corners, which it senses ahead | 31 → 64 → 12 |
+| N4 | Steering only (the throttle is automatic) | 38 inputs → 64 → 3 actions |
+| N3 | Steering, throttle and brake | 42 → 64 → 9 |
+| N2 | N3 plus a battery: boost and slipstream | 44 → 64 → 12 |
+| N1 | N2 on terrain: hills, crests and banked corners, which it senses ahead | 51 → 64 → 12 |
 
 The outputs above are one score per move (the `combined` action layout). A brain can instead pick its steering, its
 pedal and (N2, N1) its boost separately: `two_head` (N3 6, N2 / N1 7 outputs) or `three_head` (N2 / N1, 8). **New N1
 brains are `three_head`**; a driver that keeps training keeps its layout unless you move it on the Train page. See
 [action layouts](brain-format.md#action-layouts).
 
-Those are today's brains. The next generation of each class swaps the radar on the 2 nearest cars ahead for one that
-sees all round the car, behind too: 20 more inputs (N4 38, N3 42, N2 44, N1 51; `--senses sectors` trains it). A class
-moves to it on a set date ([observations-and-actions.md](observations-and-actions.md#the-sector-radar-the-next-generation-of-brain)).
+Every class's radar sees all round the car, behind too, in 8 sectors
+([observations-and-actions.md](observations-and-actions.md#the-radar-8-sectors-all-round)). Brains made before it (with
+a radar on the 2 nearest cars ahead, 20 fewer inputs) still race; training one again moves it to the sector radar.
 
 N4 learns fastest; N1 has the most to learn. You choose the class with the **Class** switch at the top of the site
 when you create the driver, and it doesn't change.

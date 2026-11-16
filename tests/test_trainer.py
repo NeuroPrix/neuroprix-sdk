@@ -100,3 +100,33 @@ def test_layout_shims():
     assert brain.layout_outputs("n3", "three_head") is None and brain.layout_outputs("n4", "two_head") is None
     scores = torch.tensor([0.0, 2.0, 0.0, 3.0, 0.0, 0.0, 0.0, 1.0])   # straight, gas, boost on
     assert brain.pick_action(scores, "three_head", greedy=True) == engine.heads_action(1, 0, 1) == 10
+
+
+def _slot_brain(path, n_in=31, n_out=12):
+    """An earlier N1 brain, with the 2-slot radar (kind 7): random numbers of the right shape."""
+    import random
+    rnd = random.Random(1)
+    row = lambda n: [rnd.uniform(-0.3, 0.3) for _ in range(n)]
+    path.write_text(json.dumps({"name": "Old", "arch": f"mlp-{n_in}-64-{n_out}", "generation": 7,
+                                "fc1": {"weight": [row(n_in) for _ in range(64)], "bias": row(64)},
+                                "fc2": {"weight": [row(64) for _ in range(n_out)], "bias": row(n_out)}}))
+    return path
+
+
+@pytest.mark.parametrize("trainer", ["default", "minimal"])
+def test_a_2_slot_brain_moves_to_the_sector_radar(trainer, tmp_path):
+    start = _slot_brain(tmp_path / "old.json")
+    assert engine.Brain(json.loads(start.read_text())).gen == 7
+    session = write_session(tmp_path / "s", "n1", start_brain=start,
+                            settings={"updates": 2, "batch": 2, "eval_every": 2, "traffic": 1, "max_steps": 60, "seeds": [101]})
+    cmd = [sys.executable, "-m", "neuroprix.train"] if trainer == "default" else [sys.executable, str(ROOT / "examples" / "minimal_trainer.py")]
+    train(cmd, session)
+    b = engine.Brain(check_brain(tmp_path / "s" / "brain.json", "n1"))
+    assert b.gen == 11 and b.layout == "combined"   # (the sector radar; it keeps its own layout)
+
+
+@pytest.mark.parametrize("cls,kind", [("n4", 8), ("n3", 9), ("n2", 10), ("n1", 11)])
+def test_new_brains_have_the_sector_radar(cls, kind, tmp_path):
+    session = write_session(tmp_path, cls)
+    train([sys.executable, "-m", "neuroprix.train"], session)
+    assert engine.Brain(check_brain(tmp_path / "brain.json", cls)).gen == kind
