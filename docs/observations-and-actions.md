@@ -57,6 +57,10 @@ the "is a car" input is gone.
   pedal 0 = accelerate, 1 = coast (lift off), 2 = brake, and in N2 and N1 3 = boost (uses the battery; with nothing to
   give it's the throttle).
 
+That's the action the engine takes (`env.step_world`). A brain's outputs can be laid out three ways, one score per
+action (`combined`) or one group per control (`two_head`, `three_head`): see
+[action layouts](brain-format.md#action-layouts). New N1 brains are `three_head`.
+
 ## The rules of the road, briefly
 
 **Hills (N1's circuits and any track with heights or banks):** uphill lowers the car's top speed (a 10% climb: about

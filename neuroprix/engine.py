@@ -671,6 +671,33 @@ OBS_N1 = OBS_F1C + 2 * len(CORNER_LOOK) + 1
 # 8-sector one (32): kinds 8 = N4, 9 = N3, 10 = N2, 11 = N1
 SECTOR_EXTRA = SECTORS * SECTOR_INPUTS - RADAR_SLOTS * 6
 OBS_N4S, OBS_N3S, OBS_N2S, OBS_N1S = OBS_F3 + SECTOR_EXTRA, OBS_F2C + SECTOR_EXTRA, OBS_F1C + SECTOR_EXTRA, OBS_N1 + SECTOR_EXTRA
+# The car's controls each decision are steering (left / straight / right), pedal (gas / coast / brake) and boost
+# (off / on), held as one action number: pedal x 3 + steer, pedal 3 being gas with boost (boost does nothing with coast
+# or brake: the car can't boost and brake at once). A brain's ACTION LAYOUT says how its outputs map onto them
+# (docs/action-layouts.md); its JSON declares it ("action_layout"), and a brain without one is "combined":
+#   combined    one choice over every pedal x steering pair: 3 x pedals outputs (N2 / N1 12, N3 9; N4 3, steering)
+#   two_head    steering (3) + pedal (pedals: N2 / N1 gas, coast, brake, boost; N3 gas, coast, brake), each chosen alone
+#   three_head  steering (3) + pedal (gas, coast, brake) + boost (off, on): 8 outputs; classes with a battery only
+# Only these fixed shapes are ever loaded: a brain is plain numbers, never code or an architecture of its own.
+LAYOUTS = ("combined", "two_head", "three_head")
+
+
+def layout_outputs(gen: int, layout: str) -> int | None:
+    """How many outputs a brain of this kind has with this layout (None: the layout isn't allowed for it)."""
+    pedals = 4 if is_f1(gen) else 3 if has_pedals(gen) else 0
+    if layout == "combined":
+        return 3 * pedals if pedals else 3
+    if layout == "two_head":
+        return 3 + pedals if pedals else None
+    if layout == "three_head":
+        return 8 if pedals == 4 else None
+    return None
+
+
+def heads_action(steer: int, pedal: int, boost: int) -> int:
+    """The car's action (pedal x 3 + steer, pedal 3 = boost) from three heads' choices."""
+    return (3 if pedal == 0 and boost == 1 else pedal) * 3 + steer
+
 
 
 # Championship classes: N4 (steering only), N3 (+ pedals), N2 (+ battery boost and slipstream), N1 (+ hills and banked
@@ -756,6 +783,8 @@ class Brain:
     Generation 1: 6 inputs (5 wall rays + speed) -> 3 actions (left / straight / right).
     Generation 2: 19 inputs (5 wall rays, radar on the 2 nearest cars, speed, wheel) -> 9 actions
     (steering x accelerate/coast/brake).
+    The kind comes from the number of inputs (and the class from it); the outputs must match the brain's declared
+    action layout (LAYOUTS; none declared: "combined").
     """
 
     def __init__(self, data: dict):
@@ -765,9 +794,13 @@ class Brain:
         self.b2 = np.asarray(data["fc2"]["bias"], dtype=np.float64)
         h, n_in = self.w1.shape if self.w1.ndim == 2 else (0, 0)
         n_out = self.w2.shape[0] if self.w2.ndim == 2 else 0
-        self.gen = {(6, 3): 1, (OBS_V2, ACTIONS_V2): 2, (OBS_F3, 3): 3, (OBS_F1, ACTIONS_F1): 4,
-                    (OBS_F2C, ACTIONS_V2): 5, (OBS_F1C, ACTIONS_F1): 6, (OBS_N1, ACTIONS_F1): 7,
-                    (OBS_N4S, 3): 8, (OBS_N3S, ACTIONS_V2): 9, (OBS_N2S, ACTIONS_F1): 10, (OBS_N1S, ACTIONS_F1): 11}.get((n_in, n_out), 0)
+        self.layout = data.get("action_layout") or "combined"
+        if self.layout not in LAYOUTS:
+            raise ValueError("not a NeuroPrix brain (unknown action layout)")
+        # (the kind from the inputs: each count belongs to one kind, N3 / N4 / N4 classic told apart by their combined outputs)
+        gen = {6: 1, OBS_V2: 2, OBS_F3: 3, OBS_F1: 4, OBS_F2C: 5, OBS_F1C: 6, OBS_N1: 7,
+               OBS_N4S: 8, OBS_N3S: 9, OBS_N2S: 10, OBS_N1S: 11}.get(n_in, 0)
+        self.gen = gen if gen and layout_outputs(gen, self.layout) == n_out else 0
         self.tier = tier_of_gen(self.gen)
         if (not self.gen or self.b1.shape != (h,) or self.w2.shape != (n_out, h) or self.b2.shape != (n_out,)
                 or not 1 <= h <= 512):
@@ -786,6 +819,13 @@ class Brain:
         x = np.clip(np.asarray(obs, dtype=np.float64), 0, 1)
         h = np.maximum(self.w1 @ x + self.b1, 0)
         logits = self.w2 @ h + self.b2
+        if self.layout == "two_head":   # each head on its own (the same temperature for each)
+            return self._pick(logits[3:]) * 3 + self._pick(logits[0:3])
+        if self.layout == "three_head":
+            return heads_action(self._pick(logits[0:3]), self._pick(logits[3:6]), self._pick(logits[6:8]))
+        return self._pick(logits)
+
+    def _pick(self, logits) -> int:
         if self.temperature <= 0:
             return int(np.argmax(logits))
         # temperature sampling: usually the driver's favourite move, now and then another it rates nearly as highly,

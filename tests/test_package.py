@@ -106,9 +106,9 @@ def test_wrong_shape_brain_is_refused():
 
 def test_session_settings_accepts_the_known_settings():
     s = session_settings(["--name", "Jango", "--tier", "N2", "--updates", "400.0", "--random-tracks", "--damage", "-90",
-                          "--seeds", "3,8,21", "--one-way"])
+                          "--seeds", "3,8,21", "--one-way", "--layout", "three_head"])
     assert s == {"name": "Jango", "class": "n2", "updates": 400, "random_tracks": True, "damage": -90.0,
-                 "seeds": [3, 8, 21], "one_way": True}
+                 "seeds": [3, 8, 21], "one_way": True, "layout": "three_head"}
 
 
 @pytest.mark.parametrize("flags", [
@@ -120,6 +120,8 @@ def test_session_settings_accepts_the_known_settings():
     ["--name", "bad\nname"],
     ["--seeds", "1;rm -rf /"],
     ["--updates", "lots"],
+    ["--layout", "four_head"],            # only the fixed action layouts
+    ["--layout", "../brain.py"],
 ])
 def test_session_settings_refuses_anything_else(flags):
     with pytest.raises(ValueError):

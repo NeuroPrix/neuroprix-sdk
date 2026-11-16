@@ -123,6 +123,11 @@ Every driver belongs to a **class**. The class decides what the driver can sense
 | N2 | N3 plus a battery: boost and slipstream | 24 → 64 → 12 |
 | N1 | N2 on terrain: hills, crests and banked corners, which it senses ahead | 31 → 64 → 12 |
 
+The outputs above are one score per move (the `combined` action layout). A brain can instead pick its steering, its
+pedal and (N2, N1) its boost separately: `two_head` (N3 6, N2 / N1 7 outputs) or `three_head` (N2 / N1, 8). **New N1
+brains are `three_head`**; a driver that keeps training keeps its layout unless you move it on the Train page. See
+[action layouts](brain-format.md#action-layouts).
+
 N4 learns fastest; N1 has the most to learn. You choose the class with the **Class** switch at the top of the site
 when you create the driver, and it doesn't change.
 The details of what each class senses: [observations-and-actions.md](observations-and-actions.md).
@@ -354,6 +359,7 @@ This writes the best brain to `experiment.json` (and `experiment.pth`, the same 
 | `--traffic N` | Cars per practice run, all driven by this driver (1 = alone) | 4 |
 | `--eval-every N` | Check every N updates | 10 |
 | `--resume brain.json` | Start from an existing brain of the same class (a `.json`, or a `.pth` with PyTorch 2.6 or newer) | a new brain |
+| `--layout combined\|two_head\|three_head` | The brain's [action layout](brain-format.md#action-layouts). A resumed brain can move forward (combined → two_head → three_head) and keeps what it learned | a resumed brain's own; a new N1 brain `three_head`; others `combined` |
 | `--workers N` | Games in parallel | cores minus 2 (at most 8) |
 | `--progress-json` | Print progress as JSON lines (as the runner sees it) | text |
 | reward weights | `--progress`, `--fast`, `--damage`, `--crash`, `--corner`, `--overtake`, `--lose-place`, `--wall`, … | NeuroPrix's defaults |

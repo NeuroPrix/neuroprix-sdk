@@ -41,7 +41,7 @@ from torch.distributions import Categorical
 
 from neuroprix.browser_env import RaceEnv, load_track_spec
 from neuroprix.env import SimEnv, sim   # (sim: the race engine)
-from neuroprix.brain import GEN_OF_SHAPE, LEGACY, N_HIDDEN, PEDALS, SENSES, TIER_OF_GEN, TIERS, RaceBrain, generation, load_weights, save_brain, state_to_obs, to_sectors  # noqa: E402
+from neuroprix.brain import DEFAULT_LAYOUT, GEN_OF_SHAPE, LAYOUTS, LEGACY, N_HIDDEN, PEDALS, SENSES, TIER_OF_GEN, TIERS, RaceBrain, gen_of, generation, heads_action, layout_outputs, load_layout, load_weights, pick_action, relayout, save_brain, state_to_obs, to_sectors  # noqa: E402
 
 # Rewards (per step of 4 frames). Further along the track is a better episode.
 # A step with no new best distance pays R_IDLE. A step that advances pays for every
@@ -118,60 +118,93 @@ PEDAL_EXPLORE = {"n3": 1.5, "n2": 2.0, "n1": 2.0}   # curiosity (entropy bonus) 
 
 
 class TrainPolicy(nn.Module):
-    """The policy while training. N4: one steering choice (3). N3 / N2: two independent choices, steering (3)
-    and pedal (N3: 3; N2: 4, with boost), each with its own exploration, so braking keeps getting tried. Exported as a
-    plain RaceBrain: the 9 (N3) or 12 (N2) outputs are steer + pedal logits summed (the same distribution, the same argmax)."""
+    """The policy while training: one or more heads, each its own softmax, sampled independently, their log-probs and
+    entropies summed. layout (the brain's action layout, docs/action-layouts.md):
+      None (today's default): N4 one head (steering); N3 / N2 / N1 two heads, steering and pedal (N2 / N1: Boost as a
+        4th pedal), exported as a "combined" brain whose outputs are steer + pedal logits summed (exactly the two
+        heads' distribution, at any temperature);
+      "combined": one head over every pedal x steering pair, exported as it is;
+      "two_head": steering and pedal heads, exported as they are (3 + pedals outputs);
+      "three_head": steering, pedal (gas / coast / brake) and boost (off / on) heads (N2 / N1), exported as they are.
+    A training action is the heads' choices in mixed radix (steer + 3 x pedal [+ 9 x boost]); env_action turns it into
+    the car's action."""
 
-    def __init__(self, tier: str, senses: str = "slots"):
+    def __init__(self, tier: str, senses: str = "slots", layout: str | None = None):
         super().__init__()
         self.tier = tier
-        self.shape = SENSES[senses][tier]   # (today's radar, or the sector radar: docs/sector-radar.md)
+        self.layout = layout or "combined"   # (what the exported brain declares)
         self.pedals = PEDALS.get(tier, 0)
-        n_in, _ = self.shape
+        n_in = SENSES[senses][tier][0]   # (today's radar, or the sector radar: docs/sector-radar.md)
+        n_out = layout_outputs(tier, self.layout)
+        if n_out is None:
+            raise ValueError(f"the {self.layout} action layout isn't available in {tier.upper()}")
+        self.shape, self.gen = (n_in, n_out), gen_of(n_in, n_out, self.layout)
+        self.sizes = ([3, self.pedals] if layout is None and self.pedals else [n_out] if layout in (None, "combined")
+                      else [3, self.pedals] if layout == "two_head" else [3, 3, 2])
+        self.summed = layout is None and len(self.sizes) == 2   # (two heads exported as one combined layer)
+        self.split = len(self.sizes) > 1   # (several heads)
         self.fc1 = nn.Linear(n_in, N_HIDDEN)
-        self.head = nn.Linear(N_HIDDEN, 3 + self.pedals)
+        self.head = nn.Linear(N_HIDDEN, sum(self.sizes))
 
     def forward(self, x):
         return self.head(torch.relu(self.fc1(x)))
 
     def dists(self, x):
-        z = self(x)
-        return (Categorical(logits=z[..., :3]), Categorical(logits=z[..., 3:])) if self.pedals else (Categorical(logits=z),)
+        z, out, a = self(x), [], 0
+        for n in self.sizes:
+            out.append(Categorical(logits=z[..., a:a + n]))
+            a += n
+        return out
+
+    def _parts(self, a):
+        """A training action's choice in each head."""
+        out, base = [], 1
+        for n in self.sizes:
+            out.append((a // base) % n)
+            base *= n
+        return out
 
     def sample(self, x):
         d = self.dists(x)
-        if self.pedals:
-            s, p = d[0].sample(), d[1].sample()
-            return p * 3 + s, d[0].log_prob(s) + d[1].log_prob(p)
-        a = d[0].sample()
-        return a, d[0].log_prob(a)
+        picks = [h.sample() for h in d]
+        a, base = 0, 1
+        for p, n in zip(picks, self.sizes):
+            a = a + p * base
+            base *= n
+        return a, sum(h.log_prob(p) for h, p in zip(d, picks))
+
+    def env_action(self, a: int) -> int:
+        """The car's action for a training action (they're the same unless there are three heads)."""
+        return heads_action(a % 3, (a // 3) % 3, a // 9) if self.layout == "three_head" else int(a)
 
     def log_prob_entropy(self, x, a):
         d = self.dists(x)
-        if self.pedals:   # N2: twice the curiosity on the pedals, so Boost keeps being tried until the driver learns where it pays
-            k = PEDAL_EXPLORE.get(self.tier, 1.0)
-            return d[0].log_prob(a % 3) + d[1].log_prob(a // 3), d[0].entropy() + k * d[1].entropy()
-        return d[0].log_prob(a), d[0].entropy()
+        # the pedal (and boost) heads get extra curiosity (N2 / N1: twice), so braking and Boost keep being tried
+        # until the driver learns where they pay
+        k = PEDAL_EXPLORE.get(self.tier, 1.0)
+        lp = sum(h.log_prob(p) for h, p in zip(d, self._parts(a)))
+        ent = sum((1.0 if i == 0 else k) * h.entropy() for i, h in enumerate(d))
+        return lp, ent
 
     def export(self) -> RaceBrain:
         n_in, n_out = self.shape
-        rb = RaceBrain(n_in, N_HIDDEN, n_out)
+        rb = RaceBrain(n_in, N_HIDDEN, n_out, self.layout)
         with torch.no_grad():
             rb.fc1.load_state_dict(self.fc1.state_dict())
             W, b = self.head.weight, self.head.bias
-            if self.pedals:   # action = pedal * 3 + steer
+            if self.summed:   # action = pedal * 3 + steer: the two heads' logits summed
                 rb.fc2.weight.copy_(torch.stack([W[s] + W[3 + p] for p in range(self.pedals) for s in range(3)]))
                 rb.fc2.bias.copy_(torch.stack([b[s] + b[3 + p] for p in range(self.pedals) for s in range(3)]))
-            else:
+            else:   # (the outputs are the heads, in order)
                 rb.fc2.load_state_dict(self.head.state_dict())
         return rb
 
     def load_brain(self, sd: dict) -> None:
-        """Start from an exported brain. N3: split its 9 outputs back into steer + pedal parts (exact for
-        brains this trainer made, the closest such split otherwise)."""
+        """Start from an exported brain in this policy's layout. Today's default (two heads, combined): split its 9 or
+        12 outputs back into steer + pedal parts (exact for brains this trainer made, the closest such split otherwise)."""
         with torch.no_grad():
             self.fc1.weight.copy_(sd["fc1.weight"]); self.fc1.bias.copy_(sd["fc1.bias"])
-            if self.pedals:
+            if self.summed:
                 for key, dst in (("fc2.weight", self.head.weight), ("fc2.bias", self.head.bias)):
                     M = sd[key].reshape(self.pedals, 3, *sd[key].shape[1:])   # [pedal, steer, ...]
                     dst[:3] = M.mean(0); dst[3:] = M.mean(1) - M.mean((0, 1))
@@ -234,8 +267,8 @@ def _write_traces(job: dict, spec: dict, traces: list[dict]) -> None:
 def collect(job: dict) -> dict:
     """Play some episodes with the given weights. Returns trajectories as plain lists (cheap to send)."""
     tier, senses = job["tier"], job.get("senses", "slots")
-    policy = TrainPolicy(tier, senses)
-    gen, critic = GEN_OF_SHAPE[policy.shape], Critic(policy.shape[0])
+    policy = TrainPolicy(tier, senses, job.get("layout"))
+    gen, critic = policy.gen, Critic(policy.shape[0])
     policy.load_state_dict(job["policy"])
     critic.load_state_dict(job["critic"])
     random.seed(job["seed"])
@@ -290,7 +323,7 @@ def collect(job: dict) -> dict:
                 a, lp = policy.sample(obs)
                 v = critic(obs)
             for k, i in enumerate(mine):
-                actions[i] = int(a[k])
+                actions[i] = policy.env_action(int(a[k]))   # (the car's action; the trajectory keeps the heads' choices)
                 t = traj[i]
                 t["obs"].append(obs[k].tolist()); t["act"].append(int(a[k])); t["logp"].append(float(lp[k])); t["val"].append(float(v[k]))
             nxt = _ENV.step_world(actions)
@@ -430,7 +463,7 @@ def driving_lessons(policy, env, tier: str, rounds: int, specs: list, random_tra
     most likely choice. Copying only the most likely choice turned a young driver's steering into "always straight"
     (it turned by sometimes picking a turn, not because turning was its top choice), and it never steered again.
     From the second round, half the time it uses its own pedals, so it also learns what to do after its own mistakes."""
-    gen = GEN_OF_SHAPE[policy.shape]
+    gen = policy.gen
     teacher = TrainPolicy(tier); teacher.load_state_dict(policy.state_dict())   # its steering, as it was
     opt = torch.optim.Adam(policy.parameters(), lr=1e-3)
     O, PED, STEER = [], [], []   # STEER: the driver's own steering probabilities before the lessons
@@ -503,7 +536,7 @@ def _drive(env, model, gen, tier, spec, cars, max_steps, record=None, others=Non
             logits = model(torch.stack([state_to_obs(states[k], gen) for k in live]))
         acts = [0] * n
         for j, k in enumerate(live):
-            acts[k] = int(torch.argmax(logits[j])) if k == 0 else int(Categorical(logits=logits[j]).sample())
+            acts[k] = pick_action(logits[j], model.layout, greedy=k == 0)
         states = env.step_world(acts)
         touches += states[0].get("contacts", 0)
         walls += states[0].get("hits", 0)
@@ -596,6 +629,8 @@ def session_argv(path: str) -> list[str]:
             argv += ["--" + k.replace("_", "-"), str(float(v) if not isinstance(v, int) else v)]
         elif k == "seeds":
             argv += ["--seeds", ",".join(str(int(x)) for x in v)]
+        elif k == "layout" and v in LAYOUTS:   # the coach's choice of action layout (docs/action-layouts.md)
+            argv += ["--layout", v]
         else:
             sys.exit(f"unknown setting {k!r} in the session: update the trainer")
     for i, spec in enumerate(s.get("tracks") or []):
@@ -631,6 +666,11 @@ def main() -> None:
                     "(grid: standing at the line; rolling: moving, somewhere round; random: standing, somewhere round; default random)")
     ap.add_argument("--league", action="append", default=[], help="league opponents: brain .json files or folders of them (repeatable)")
     ap.add_argument("--league-cars", type=int, default=0, help="cars per episode driven by league brains (not learned from)")
+    ap.add_argument("--layout", choices=LAYOUTS, default=None,
+                    help="the brain's action layout (docs/action-layouts.md): combined (one choice over every pedal x "
+                         "steering pair), two_head (steering, pedal) or three_head (steering, pedal, boost; N2 / N1). "
+                         "Default: a resumed brain's own; a new N1 brain three_head; else two heads trained and saved as "
+                         "combined (as always)")
     ap.add_argument("--contact-blame", action="store_true", help="a touch costs the car that caused it 1.5x, the car hit 0.5x")
     ap.add_argument("--updates", type=int, default=150, help="policy updates")
     ap.add_argument("--batch", type=int, default=8, help="episodes (fields of cars) per update")
@@ -760,14 +800,22 @@ def main() -> None:
             return 1.0
         return round(args.learner_start + (1 - args.learner_start) * min(1.0, (update - 1) / args.learner_updates), 3)
     tier = args.tier
-    if args.resume and args.senses == "slots":   # a brain that already has the sector radar keeps it
+    src_layout = "combined"
+    if args.resume:   # a brain keeps its sector radar and its action layout unless told otherwise
         try:
-            w = load_weights(args.resume)["fc1.weight"]
-            if (w.shape[1], load_weights(args.resume)["fc2.weight"].shape[0]) == SENSES["sectors"][tier]:
+            src_layout = load_layout(args.resume)
+            if args.senses == "slots" and load_weights(args.resume)["fc1.weight"].shape[1] == SENSES["sectors"][tier][0]:
                 args.senses = "sectors"
         except (ValueError, KeyError):
             pass   # (reported below)
-    policy = TrainPolicy(tier, args.senses)
+        if args.layout is None and src_layout != "combined":
+            args.layout = src_layout
+    elif args.layout is None:   # a new brain: its class's default layout (N1: three_head)
+        args.layout = DEFAULT_LAYOUT.get(tier)
+    try:
+        policy = TrainPolicy(tier, args.senses, args.layout)
+    except ValueError as e:
+        sys.exit(f"--layout: {e}")
     critic = Critic(policy.shape[0])
     if args.resume:
         try:
@@ -776,9 +824,18 @@ def main() -> None:
             sys.exit(f"--resume: {e}")
         shape = (sd["fc1.weight"].shape[1], sd["fc2.weight"].shape[0])
         if args.senses == "sectors" and shape == TIERS[tier] and sd["fc1.weight"].shape[0] == N_HIDDEN:
-            sd, shape = to_sectors(sd), policy.shape   # today's radar -> the sector radar (docs/sector-radar.md, section 5)
+            sd = to_sectors(sd)   # today's radar -> the sector radar (docs/sector-radar.md, section 5)
+            shape = (policy.shape[0], shape[1])
             say("moving the brain to the sector radar: its old radar dropped, 8 sectors all round starting switched off",
                 event="note", message="moved the brain to the sector radar")
+        if src_layout != policy.layout and shape[0] == policy.shape[0]:
+            try:
+                sd = relayout(sd, src_layout, policy.layout, policy.pedals)
+            except ValueError as e:
+                sys.exit(f"--layout: {e}")
+            shape = (shape[0], sd["fc2.weight"].shape[0])
+            say(f"moving the brain's choices to the {policy.layout} action layout", event="note",
+                message=f"moved the brain to the {policy.layout} action layout")
         if shape == LEGACY.get(tier) and sd["fc1.weight"].shape[0] == N_HIDDEN:
             # an earlier brain of this class, without the corner-ahead sense: add those inputs switched off, so it drives
             # exactly as before and learns to use them from here
@@ -787,9 +844,9 @@ def main() -> None:
             say(f"upgrading the brain: {extra} new inputs (the corners ahead), starting switched off", event="note",
                 message="upgraded the brain with the corner-ahead sense")
         if (sd["fc1.weight"].shape[1], sd["fc2.weight"].shape[0]) != policy.shape or sd["fc1.weight"].shape[0] != N_HIDDEN:
-            sys.exit(f"--resume needs a {tier.upper()} brain; other brains start a new one from scratch")
+            sys.exit(f"--resume needs a {tier.upper()} brain ({policy.layout} action layout); other brains start a new one from scratch")
         policy.load_brain(sd)
-        if policy.pedals and args.reopen_pedals < 1:   # a driver that stopped trying the brake (or boost) never learns it
+        if policy.split and args.reopen_pedals < 1:   # a driver that stopped trying the brake (or boost) never learns it
             with torch.no_grad():                       # pays: flatten its pedal choice so every pedal gets tried again
                 policy.head.weight[3:] *= args.reopen_pedals
                 policy.head.bias[3:] *= args.reopen_pedals
@@ -797,10 +854,14 @@ def main() -> None:
         with torch.no_grad():   # gentle start; an N3 newborn leans a little on the throttle (pedal head: 0 = accelerate)
             policy.head.weight.mul_(0.1)
             policy.head.bias.zero_()
-            if policy.pedals:
+            if policy.split:
                 policy.head.bias[3] += 0.5
-                if policy.pedals == 4:   # N2: Boost starts as likely as the throttle
-                    policy.head.bias[6] += 0.5
+                if policy.pedals == 4 and policy.layout != "three_head":   # N2: Boost starts as likely as the throttle
+                    policy.head.bias[6] += 0.5                              # (three heads: its own head, at even odds)
+            elif policy.pedals:   # (one joint head: the same lean, on every throttle and boost pair)
+                policy.head.bias[0:3] += 0.5
+                if policy.pedals == 4:
+                    policy.head.bias[9:12] += 0.5
     params = list(policy.parameters()) + list(critic.parameters())
     opt = torch.optim.Adam(params, lr=args.lr)
     name = args.name or Path(args.out).stem
@@ -819,7 +880,7 @@ def main() -> None:
         stage("Learning to drive: a new driver usually needs a few hundred updates before it gets round"
               + ((" (on N1's hilly circuits, about 600-1000)" if tier == "n1" else " (on Grand Prix circuits, about 200-400)")
                  if args.random_tracks else ""))
-    elif args.lessons > 0 and policy.pedals:
+    elif args.lessons > 0 and policy.summed:
         driving_lessons(policy, env, tier, args.lessons, specs, args.random_tracks, say, both_ways)
         warmup = max(warmup, 10)   # the critic learns the new driving before the driver starts changing
     label = "random procedural circuits" if args.random_tracks else ", ".join(env.setup_world(s, 1)["name"] for s in specs)
@@ -873,7 +934,7 @@ def main() -> None:
         rb = policy.export()
         layer = lambda fc: {"weight": [[round(v, 4) for v in row] for row in fc.weight.tolist()],
                             "bias": [round(v, 4) for v in fc.bias.tolist()]}
-        print(json.dumps({"event": "net", "update": update, "fc1": layer(rb.fc1), "fc2": layer(rb.fc2)}), flush=True)
+        print(json.dumps({"event": "net", "update": update, "action_layout": rb.layout, "fc1": layer(rb.fc1), "fc2": layer(rb.fc2)}), flush=True)
     try:
         send_net(0)
         if args.resume:   # a session that only makes things worse keeps the starting weights
@@ -901,7 +962,7 @@ def main() -> None:
                      "rewards": rewards, "speed_cap": speed_cap(update), "fragile": update <= args.first_lessons,
                      "gamma": args.gamma, "slow_traffic": args.slow_traffic, "slow_speed": args.slow_speed,
                      "senses": args.senses, "starts": starts, "league": league, "league_cars": args.league_cars,
-                     "contact_blame": args.contact_blame} for w in range(workers)]
+                     "contact_blame": args.contact_blame, "layout": args.layout} for w in range(workers)]
             parts = gather([j for j in jobs if j["specs"]])
             trajs = [t for p in parts for t in p["traj"]]
             contacts = sum(p["contacts"] for p in parts)
@@ -957,7 +1018,7 @@ def main() -> None:
         say(f"\nBest score on training tracks: {best:.2f} -> {args.out}", event="trained", best=round(max(0.0, best), 4))
         if holdout and Path(args.out).exists():
             n_in, n_out = policy.shape
-            best_model = RaceBrain(n_in, N_HIDDEN, n_out)
+            best_model = RaceBrain(n_in, N_HIDDEN, n_out, policy.layout)
             best_model.load_state_dict(load_weights(Path(args.out).with_suffix(".json")))
             _, res = evaluate(env, best_model, holdout, cars, 3000)
             prog = sum(r["progress"] for r in res) / len(res)

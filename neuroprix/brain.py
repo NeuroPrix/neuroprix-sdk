@@ -44,17 +44,41 @@ RADAR_AT, SLOT_RADAR, SECTOR_RADAR = 5, 12, 32
 EMPTY_SLOTS = [0, 1, 0.5, 0.5, 0.5, 0] * 2           # what today's radar reads with nobody in range
 SECTOR_TIERS = {t: (n + SECTOR_RADAR - SLOT_RADAR, a) for t, (n, a) in TIERS.items()}   # n4 38, n3 42, n2 44, n1 51
 SENSES = {"slots": TIERS, "sectors": SECTOR_TIERS}
+# Shapes with the "combined" action layout (below), the one every brain had before layouts
 GEN_OF_SHAPE = {GEN1: 1, (N_INPUTS, N_ACTIONS): 2, F3_SHAPE: 3, F1_SHAPE: 4, F2C_SHAPE: 5, F1C_SHAPE: 6, N1_SHAPE: 7,
                 SECTOR_TIERS["n4"]: 8, SECTOR_TIERS["n3"]: 9, SECTOR_TIERS["n2"]: 10, SECTOR_TIERS["n1"]: 11}
+GEN_OF_INPUTS = {shape[0]: g for shape, g in GEN_OF_SHAPE.items()}   # (each input count is one kind)
 TIER_OF_GEN = {1: "n4", 2: "n3", 3: "n4", 4: "n2", 5: "n3", 6: "n2", 7: "n1", 8: "n4", 9: "n3", 10: "n2", 11: "n1"}
 PEDALS = {"n3": 3, "n2": 4, "n1": 4}                 # pedal choices per tier (N4 has none)
+# Action layouts (docs/action-layouts.md; backend/sim.py LAYOUTS): how a brain's outputs map onto the car's controls.
+# The brain's JSON declares it ("action_layout"); none declared means "combined".
+#   combined    one choice over every pedal x steering pair (action = pedal x 3 + steer; Boost is pedal 3)
+#   two_head    steering (3) + pedal (N3: gas / coast / brake; N2, N1: + boost), each chosen alone
+#   three_head  steering (3) + pedal (gas / coast / brake) + boost (off / on): N2 and N1 only
+LAYOUTS = ("combined", "two_head", "three_head")
+# A new brain's layout when none is asked for (docs/action-layouts.md: three_head measured cleanest for N1). A brain that
+# continues keeps its own; other classes train two heads and save them as combined, as always.
+DEFAULT_LAYOUT = {"n1": "three_head"}
+
+
+def layout_outputs(tier: str, layout: str) -> int | None:
+    """A class's output count with this layout (None: not allowed for it)."""
+    p = PEDALS.get(tier, 0)
+    return {"combined": 3 * p if p else 3, "two_head": 3 + p if p else None, "three_head": 8 if p == 4 else None}.get(layout)
+
+
+def gen_of(n_in: int, n_out: int, layout: str = "combined") -> int:
+    """A brain's kind from its inputs, if its outputs fit its layout (0: not a brain)."""
+    g = GEN_OF_INPUTS.get(n_in, 0)
+    return g if g and layout in LAYOUTS and layout_outputs(TIER_OF_GEN[g], layout) == n_out else 0
 STEER = ("left", "straight", "right")
 PEDAL = ("accelerate", "coast", "brake", "boost")
 
 
 class RaceBrain(nn.Module):
-    def __init__(self, n_inputs: int = N_INPUTS, n_hidden: int = N_HIDDEN, n_actions: int = N_ACTIONS):
+    def __init__(self, n_inputs: int = N_INPUTS, n_hidden: int = N_HIDDEN, n_actions: int = N_ACTIONS, layout: str = "combined"):
         super().__init__()
+        self.layout = layout   # (how its outputs map onto the controls: LAYOUTS)
         self.fc1 = nn.Linear(n_inputs, n_hidden)
         self.fc2 = nn.Linear(n_hidden, n_actions)
 
@@ -67,7 +91,7 @@ class RaceBrain(nn.Module):
 
 
 def generation(model: "RaceBrain") -> int:
-    return GEN_OF_SHAPE.get((model.fc1.in_features, model.fc2.out_features), 0)
+    return gen_of(model.fc1.in_features, model.fc2.out_features, getattr(model, "layout", "combined"))
 
 
 def tier_of(model: "RaceBrain") -> str:
@@ -77,7 +101,7 @@ def tier_of(model: "RaceBrain") -> str:
 def state_to_obs(state: dict, gen: int = 2) -> torch.Tensor:
     """Game state JSON -> input tensor (already normalised 0..1 by the game)."""
     feats = [float(v) for v in state["sensors"]] + [float(state["speed"])] if gen == 1 else state["obs"]
-    want = {g: shape[0] for shape, g in GEN_OF_SHAPE.items()}[gen]
+    want = {g: n for n, g in GEN_OF_INPUTS.items()}[gen]
     if len(feats) != want:
         raise ValueError(f"expected {want} features, got {len(feats)}")
     return torch.tensor(feats, dtype=torch.float32).clamp_(0.0, 1.0)
@@ -97,6 +121,60 @@ def to_sectors(sd: dict) -> dict:
     return out
 
 
+def heads_action(steer: int, pedal: int, boost: int) -> int:
+    """The car's action (pedal x 3 + steer, pedal 3 = boost) from three heads' choices (as backend/sim.py)."""
+    return (3 if pedal == 0 and boost == 1 else pedal) * 3 + steer
+
+
+def pick_action(logits: torch.Tensor, layout: str, greedy: bool) -> int:
+    """The car's action from a brain's outputs, by its layout: the best of each head (greedy) or each sampled from its
+    softmax. Mirrors backend/sim.py Brain.act."""
+    def pick(z):
+        return int(torch.argmax(z)) if greedy else int(torch.distributions.Categorical(logits=z).sample())
+    if layout == "two_head":
+        return pick(logits[3:]) * 3 + pick(logits[0:3])
+    if layout == "three_head":
+        return heads_action(pick(logits[0:3]), pick(logits[3:6]), pick(logits[6:8]))
+    return pick(logits)
+
+
+def relayout(sd: dict, src: str, dst: str, pedals: int) -> dict:
+    """A brain's output layer moved from one action layout to another (the inputs and hidden layer kept).
+    combined -> two_head: steering and pedal split back out of the joint scores (exact for brains the two-head trainer
+    exported as combined: their scores are steer + pedal sums; the closest such split otherwise). two_head ->
+    three_head: gas / coast / brake keep their scores, boost on / off get the boost / gas scores, so steering, and
+    boost-or-not with the throttle, are exactly as before; only how often the throttle is chosen shifts a little."""
+    out = dict(sd)
+    for key in ("fc2.weight", "fc2.bias"):
+        z = sd[key]
+        if src == "combined" and dst in ("two_head", "three_head"):
+            M = z.reshape(pedals, 3, *z.shape[1:])   # [pedal, steer, ...]
+            z = torch.cat([M.mean(0), M.mean(1) - M.mean((0, 1))])
+            src_now = "two_head"
+        else:
+            src_now = src
+        if src_now == "two_head" and dst == "three_head":
+            z = torch.cat([z[0:3], z[3:6], z[3:4], z[6:7]])
+            src_now = "three_head"
+        if src_now != dst:
+            raise ValueError(f"can't move a brain from the {src} action layout to {dst}")
+        out[key] = z
+    return out
+
+
+def load_layout(path: str | Path) -> str:
+    """The action layout a saved brain declares (a .pth: from the .json beside it); "combined" if none."""
+    path = Path(path)
+    js = path if path.suffix.lower() == ".json" else path.with_suffix(".json")
+    try:
+        layout = json.loads(js.read_text()).get("action_layout") or "combined"
+    except (OSError, ValueError, AttributeError):
+        return "combined"
+    if layout not in LAYOUTS:
+        raise ValueError(f"{js.name}: unknown action layout {layout!r}")
+    return layout
+
+
 def save_brain(model: RaceBrain, path: str | Path, name: str = "agent") -> None:
     """Save weights as .pth (for the Grand Prix server) and .json (for the in-browser race viewer)."""
     path = Path(path)
@@ -109,6 +187,8 @@ def save_brain(model: RaceBrain, path: str | Path, name: str = "agent") -> None:
         "fc1": {"weight": sd["fc1.weight"], "bias": sd["fc1.bias"]},
         "fc2": {"weight": sd["fc2.weight"], "bias": sd["fc2.bias"]},
     }
+    if getattr(model, "layout", "combined") != "combined":   # (none declared means combined, as every earlier brain)
+        brain["action_layout"] = model.layout
     path.with_suffix(".json").write_text(json.dumps(brain))
 
 
@@ -145,12 +225,13 @@ def load_brain(path: str | Path) -> RaceBrain:
         raise ValueError(f"unexpected keys {sorted(sd.keys())}; expected {sorted(expected)}")
     hidden, n_in = sd["fc1.weight"].shape
     n_out = sd["fc2.weight"].shape[0]
-    if (n_in, n_out) not in GEN_OF_SHAPE:
-        raise ValueError(f"expected an N3 ({N_INPUTS} inputs, {N_ACTIONS} actions), N4 ({F3_SHAPE[0]}, {F3_SHAPE[1]}) "
-                         f"or N4 classic ({GEN1[0]}, {GEN1[1]}) brain, got {n_in} inputs and {n_out} actions")
+    layout = load_layout(path)
+    if not gen_of(n_in, n_out, layout):
+        raise ValueError(f"not a NeuroPrix brain: {n_in} inputs and {n_out} outputs don't fit any class with the "
+                         f"{layout} action layout")
     if not (1 <= hidden <= 512):
         raise ValueError("hidden layer must have 1..512 neurons")
-    model = RaceBrain(n_inputs=n_in, n_hidden=hidden, n_actions=n_out)
+    model = RaceBrain(n_inputs=n_in, n_hidden=hidden, n_actions=n_out, layout=layout)
     model.load_state_dict(sd)  # raises on any shape mismatch
     for p in model.parameters():
         if not torch.isfinite(p).all():

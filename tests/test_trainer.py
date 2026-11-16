@@ -70,3 +70,33 @@ def test_custom_rewards_example(tmp_path):
     events = train([sys.executable, str(ROOT / "examples" / "custom_rewards.py")], session)
     assert events[-1]["event"] == "done"
     check_brain(tmp_path / "brain.json", "n3")
+
+
+@pytest.mark.parametrize("layout", ["combined", "two_head", "three_head", None])
+def test_action_layouts(layout, tmp_path):
+    """A session's layout setting (docs/brain-format.md#action-layouts); without one, a new N1 brain is three_head."""
+    settings = {"updates": 2, "batch": 2, "eval_every": 2, "traffic": 1, "max_steps": 60, "seeds": [101]}
+    if layout:
+        settings["layout"] = layout
+    session = write_session(tmp_path, "n1", settings=settings)
+    train([sys.executable, "-m", "neuroprix.train"], session)
+    data = check_brain(tmp_path / "brain.json", "n1")
+    assert engine.Brain(data).layout == (layout or "three_head")
+    assert len(data["fc2"]["weight"]) == {"combined": 12, "two_head": 7, "three_head": 8}[layout or "three_head"]
+
+
+def test_minimal_trainer_three_heads(tmp_path):
+    session = write_session(tmp_path, "n1", settings={"updates": 2, "seeds": [101], "layout": "three_head"})
+    train([sys.executable, str(ROOT / "examples" / "minimal_trainer.py")], session)
+    assert engine.Brain(check_brain(tmp_path / "brain.json", "n1")).layout == "three_head"
+
+
+def test_layout_shims():
+    import torch
+
+    from neuroprix import brain
+    assert brain.LAYOUTS == ("combined", "two_head", "three_head") and brain.DEFAULT_LAYOUT == {"n1": "three_head"}
+    assert [brain.layout_outputs("n1", l) for l in brain.LAYOUTS] == [12, 7, 8]
+    assert brain.layout_outputs("n3", "three_head") is None and brain.layout_outputs("n4", "two_head") is None
+    scores = torch.tensor([0.0, 2.0, 0.0, 3.0, 0.0, 0.0, 0.0, 1.0])   # straight, gas, boost on
+    assert brain.pick_action(scores, "three_head", greedy=True) == engine.heads_action(1, 0, 1) == 10

@@ -107,6 +107,10 @@ def session_settings(flags: list) -> dict:
             if not re.match(r"^n[1-4]$", c):
                 raise ValueError("unknown class")
             out["class"] = c
+        elif name == "layout":   # the brain's action layout: one of the fixed few (the SDK's docs/brain-format.md)
+            if v not in ("combined", "two_head", "three_head"):
+                raise ValueError("unknown action layout")
+            out["layout"] = v
         elif name == "seeds":
             if not re.match(r"^[0-9,]{0,2000}$", v):
                 raise ValueError("odd seeds")

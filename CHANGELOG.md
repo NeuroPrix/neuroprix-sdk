@@ -5,6 +5,17 @@ version may need you to change your own trainer; minor and patch versions don't.
 (`neuroprix.ENGINE_VERSION`, e.g. `2026.11.2`), shown by `neuroprix-runner --version`; when it changes, update the SDK
 so you train on the same physics the races use.
 
+## Unreleased
+
+- **Action layouts** ([docs/brain-format.md](docs/brain-format.md#action-layouts)): a brain's `action_layout` says
+  how its outputs become steering, pedal and boost: `combined` (one score per action, as before), `two_head` or
+  `three_head` (a group per control, each picked on its own). New N1 brains are `three_head`. The engine, the
+  environment, `neuroprix.brain` (`LAYOUTS`, `DEFAULT_LAYOUT`, `layout_outputs`, `pick_action`, `relayout`,
+  `load_layout`) and `neuroprix-train --layout` handle all three; a brain that continues keeps its own.
+- The session's `layout` setting ([the trainer contract](docs/trainer-contract.md)) and the runner accept it.
+  Older runners refuse sessions that carry it, so update the SDK.
+- `examples/minimal_trainer.py` builds the layout the session asks for and drives each head.
+
 ## 0.2.0 (2026-11-12): first public release
 
 Engine 2026.11.3.
