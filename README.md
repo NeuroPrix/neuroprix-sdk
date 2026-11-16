@@ -22,6 +22,10 @@ python3 -m venv ~/neuroprix                     # a separate environment for it
 
 (On Windows: `py -m venv $HOME\neuroprix`, then `$HOME\neuroprix\Scripts\pip` and `...\Scripts\neuroprix-runner`.)
 
+`~/neuroprix/bin/neuroprix-runner --version` should say `0.2.0 (engine 2026.11.4)` or newer. If `pip` installed
+version 0.0.1, that's a placeholder: install from the source instead (`git clone
+https://github.com/NeuroPrix/neuroprix-sdk`, then `~/neuroprix/bin/pip install ./neuroprix-sdk`).
+
 1. The runner shows a code. On the site, open the **Train** page and pick a driver. Under **Trains on**, click
    **Add a computer**, type the code and click **Link a runner**. (Once per computer: it remembers the link.)
 2. Under **Trains on**, choose your computer, then click **Start training**.
@@ -29,6 +33,16 @@ python3 -m venv ~/neuroprix                     # a separate environment for it
    keep). The best version becomes your driver's new version.
 
 Leave the runner running: it trains every session you send it, one at a time. Ctrl+C stops it.
+
+**Try it first, no account needed:** train a driver on your own computer and look at what it learned.
+
+```bash
+~/neuroprix/bin/neuroprix-train --tier n1 --random-tracks --updates 20 --out my_driver.pth
+```
+
+It prints each update and each check, and writes `my_driver.json`: an N1 brain with the all-round radar (51 inputs)
+and three heads (8 outputs), [the brain format](docs/brain-format.md). Twenty updates only teach the first metres; a
+new N1 driver needs about 800 to get round. To give a driver on the site a new version, train it through the runner.
 
 With Docker (good for a rented machine):
 

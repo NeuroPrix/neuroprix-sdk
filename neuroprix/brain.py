@@ -6,7 +6,7 @@ Tiers (like the N4 / N3 / N2 ladder; the brain's shape says which it is):
   N2          21 inputs -> 12 actions  N3 + battery and slipstream inputs; pedals accelerate / coast / brake / BOOST
   N4 classic   6 inputs -> 3 actions   the first drivers: wall rays + speed, no radar (still races in N4)
 Internally a brain's "generation" is its kind: 1 = N4 classic, 2 = N3, 3 = N4, 4 = N2.
-The sector-radar generation (kinds 8 = N4, 9 = N3, 10 = N2, 11 = N1; docs/sector-radar.md) has the same senses with
+The sector-radar generation (kinds 8 = N4, 9 = N3, 10 = N2, 11 = N1; docs/observations-and-actions.md) has the same senses with
 the 2-slot radar (12 inputs) swapped for 8 sectors all round the car (32): 20 more inputs in each class.
 
 N3 in detail:
@@ -50,13 +50,13 @@ GEN_OF_SHAPE = {GEN1: 1, (N_INPUTS, N_ACTIONS): 2, F3_SHAPE: 3, F1_SHAPE: 4, F2C
 GEN_OF_INPUTS = {shape[0]: g for shape, g in GEN_OF_SHAPE.items()}   # (each input count is one kind)
 TIER_OF_GEN = {1: "n4", 2: "n3", 3: "n4", 4: "n2", 5: "n3", 6: "n2", 7: "n1", 8: "n4", 9: "n3", 10: "n2", 11: "n1"}
 PEDALS = {"n3": 3, "n2": 4, "n1": 4}                 # pedal choices per tier (N4 has none)
-# Action layouts (docs/action-layouts.md; backend/sim.py LAYOUTS): how a brain's outputs map onto the car's controls.
+# Action layouts (docs/brain-format.md; backend/sim.py LAYOUTS): how a brain's outputs map onto the car's controls.
 # The brain's JSON declares it ("action_layout"); none declared means "combined".
 #   combined    one choice over every pedal x steering pair (action = pedal x 3 + steer; Boost is pedal 3)
 #   two_head    steering (3) + pedal (N3: gas / coast / brake; N2, N1: + boost), each chosen alone
 #   three_head  steering (3) + pedal (gas / coast / brake) + boost (off / on): N2 and N1 only
 LAYOUTS = ("combined", "two_head", "three_head")
-# A new brain's layout when none is asked for (docs/action-layouts.md: three_head measured cleanest for N1). A brain that
+# A new brain's layout when none is asked for (docs/brain-format.md: three_head measured cleanest for N1). A brain that
 # continues keeps its own; other classes train two heads and save them as combined, as always.
 DEFAULT_LAYOUT = {"n1": "three_head"}
 
@@ -108,8 +108,7 @@ def state_to_obs(state: dict, gen: int = 2) -> torch.Tensor:
 
 
 def to_sectors(sd: dict) -> dict:
-    """A brain of today's kind (2-slot radar) moved to the sector-radar kind of its class (docs/sector-radar.md, section
-    5): the weights from every input both kinds have are copied, the old radar's weights are dropped (what they added
+    """A brain of today's kind (2-slot radar) moved to the sector-radar kind of its class (docs/observations-and-actions.md): the weights from every input both kinds have are copied, the old radar's weights are dropped (what they added
     with nobody in range is folded into the hidden biases) and the new radar's weights start at 0. With no car in
     range it makes exactly the choices the old brain made with nobody in range."""
     W, b = sd["fc1.weight"], sd["fc1.bias"]

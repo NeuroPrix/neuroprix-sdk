@@ -119,7 +119,7 @@ PEDAL_EXPLORE = {"n3": 1.5, "n2": 2.0, "n1": 2.0}   # curiosity (entropy bonus) 
 
 class TrainPolicy(nn.Module):
     """The policy while training: one or more heads, each its own softmax, sampled independently, their log-probs and
-    entropies summed. layout (the brain's action layout, docs/action-layouts.md):
+    entropies summed. layout (the brain's action layout, docs/brain-format.md):
       None (today's default): N4 one head (steering); N3 / N2 / N1 two heads, steering and pedal (N2 / N1: Boost as a
         4th pedal), exported as a "combined" brain whose outputs are steer + pedal logits summed (exactly the two
         heads' distribution, at any temperature);
@@ -134,7 +134,7 @@ class TrainPolicy(nn.Module):
         self.tier = tier
         self.layout = layout or "combined"   # (what the exported brain declares)
         self.pedals = PEDALS.get(tier, 0)
-        n_in = SENSES[senses][tier][0]   # (the sector radar, docs/sector-radar.md; "slots": the earlier 2-slot radar)
+        n_in = SENSES[senses][tier][0]   # (the sector radar, docs/observations-and-actions.md; "slots": the earlier 2-slot radar)
         n_out = layout_outputs(tier, self.layout)
         if n_out is None:
             raise ValueError(f"the {self.layout} action layout isn't available in {tier.upper()}")
@@ -629,7 +629,7 @@ def session_argv(path: str) -> list[str]:
             argv += ["--" + k.replace("_", "-"), str(float(v) if not isinstance(v, int) else v)]
         elif k == "seeds":
             argv += ["--seeds", ",".join(str(int(x)) for x in v)]
-        elif k == "layout" and v in LAYOUTS:   # the coach's choice of action layout (docs/action-layouts.md)
+        elif k == "layout" and v in LAYOUTS:   # the coach's choice of action layout (docs/brain-format.md)
             argv += ["--layout", v]
         else:
             sys.exit(f"unknown setting {k!r} in the session: update the trainer")
@@ -660,7 +660,7 @@ def main() -> None:
                     help="n4: steering only (fast to train); n3: steering + pedals; n2: + battery boost and slipstream inputs")
     ap.add_argument("--traffic", type=int, default=4, help="cars per episode, all driven by this driver (1 = alone; at most 10)")
     ap.add_argument("--senses", choices=["slots", "sectors"], default="sectors",
-                    help="the radar: 8 sectors all round the car (the default, docs/sector-radar.md) or the earlier one "
+                    help="the radar: 8 sectors all round the car (the default, docs/observations-and-actions.md) or the earlier one "
                          "on the 2 nearest cars ahead (slots: for experiments). A resumed 2-slot brain is moved to the "
                          "sector radar, keeping everything else it learned")
     ap.add_argument("--starts", default="", help="each episode's start, weighted, e.g. grid:0.4,rolling:0.3,random:0.3 "
@@ -668,7 +668,7 @@ def main() -> None:
     ap.add_argument("--league", action="append", default=[], help="league opponents: brain .json files or folders of them (repeatable)")
     ap.add_argument("--league-cars", type=int, default=0, help="cars per episode driven by league brains (not learned from)")
     ap.add_argument("--layout", choices=LAYOUTS, default=None,
-                    help="the brain's action layout (docs/action-layouts.md): combined (one choice over every pedal x "
+                    help="the brain's action layout (docs/brain-format.md): combined (one choice over every pedal x "
                          "steering pair), two_head (steering, pedal) or three_head (steering, pedal, boost; N2 / N1). "
                          "Default: a resumed brain's own; a new N1 brain three_head; else two heads trained and saved as "
                          "combined (as always)")
@@ -833,7 +833,7 @@ def main() -> None:
             say(f"upgrading the brain: {extra} new inputs (the corners ahead), starting switched off", event="note",
                 message="upgraded the brain with the corner-ahead sense")
         if args.senses == "sectors" and shape == TIERS[tier] and sd["fc1.weight"].shape[0] == N_HIDDEN:
-            sd = to_sectors(sd)   # today's radar -> the sector radar (docs/sector-radar.md, section 5)
+            sd = to_sectors(sd)   # today's radar -> the sector radar (docs/observations-and-actions.md)
             shape = (policy.shape[0], shape[1])
             say("moving the brain to the sector radar: its old radar dropped, 8 sectors all round starting switched off",
                 event="note", message="moved the brain to the sector radar")

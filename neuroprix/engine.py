@@ -40,7 +40,7 @@ YAW_K, DRIFT_SCRUB, SLIDE_GRIP = 1.6, 0.015, 0.7   # drift: the body turns up to
                                                  # grip (SLIDE_GRIP of it once sliding 0.4 rad); sliding costs DRIFT_SCRUB x |sin(slip)|
 WHEELBASE, MAX_STEER = 12.0, 0.6   # N3 bicycle: rear axle to front axle, front-wheel angle at full lock
 CAR_R, RADAR_RANGE, RADAR_SLOTS = 5, 200, 2
-# The sector radar (brain kinds 8-11, docs/sector-radar.md): the nearest car in each of 8 sectors round the car, all the
+# The sector radar (brain kinds 8-11, docs/observations-and-actions.md): the nearest car in each of 8 sectors round the car, all the
 # way round, 4 numbers each (seen, near, closing, sideways). Sectors by bearing from the nose (+ = right): front +-15 deg,
 # front diagonals to 60, sides to 120, rear diagonals to 160, rear the last 40. Chosen by comparing |ly| with lx times
 # these tangents (exact literals, the same in game/index.html), never by atan2, so both engines agree on a boundary.
@@ -667,14 +667,14 @@ CORNER_LOOK = (30, 90, 180)
 OBS_F2C, OBS_F1C = OBS_V2 + len(CORNER_LOOK), OBS_F1 + len(CORNER_LOOK)
 # N1 (kind 7): N2's senses + the road's grade and bank at CORNER_LOOK px ahead + the tyres' load now
 OBS_N1 = OBS_F1C + 2 * len(CORNER_LOOK) + 1
-# The sector-radar generation (docs/sector-radar.md): the same senses with the 2-slot radar (12 inputs) swapped for the
+# The sector-radar generation (docs/observations-and-actions.md): the same senses with the 2-slot radar (12 inputs) swapped for the
 # 8-sector one (32): kinds 8 = N4, 9 = N3, 10 = N2, 11 = N1
 SECTOR_EXTRA = SECTORS * SECTOR_INPUTS - RADAR_SLOTS * 6
 OBS_N4S, OBS_N3S, OBS_N2S, OBS_N1S = OBS_F3 + SECTOR_EXTRA, OBS_F2C + SECTOR_EXTRA, OBS_F1C + SECTOR_EXTRA, OBS_N1 + SECTOR_EXTRA
 # The car's controls each decision are steering (left / straight / right), pedal (gas / coast / brake) and boost
 # (off / on), held as one action number: pedal x 3 + steer, pedal 3 being gas with boost (boost does nothing with coast
 # or brake: the car can't boost and brake at once). A brain's ACTION LAYOUT says how its outputs map onto them
-# (docs/action-layouts.md); its JSON declares it ("action_layout"), and a brain without one is "combined":
+# (docs/brain-format.md); its JSON declares it ("action_layout"), and a brain without one is "combined":
 #   combined    one choice over every pedal x steering pair: 3 x pedals outputs (N2 / N1 12, N3 9; N4 3, steering)
 #   two_head    steering (3) + pedal (pedals: N2 / N1 gas, coast, brake, boost; N3 gas, coast, brake), each chosen alone
 #   three_head  steering (3) + pedal (gas, coast, brake) + boost (off, on): 8 outputs; classes with a battery only
@@ -1533,7 +1533,7 @@ class World:
         right, front-right), the nearest car whose centre is in it within RADAR_RANGE: seen, near (1 - distance / range),
         closing (0.5 + how fast the distance shrinks / 2 top speeds) and sideways (0.5 + its velocity relative to this
         car across its axis, + = right / 2 top speeds). An empty sector reads EMPTY_SECTOR. Flat: 32 numbers.
-        Mirrors World.sectorsFor in the browser (docs/sector-radar.md)."""
+        Mirrors World.sectorsFor in the browser (docs/observations-and-actions.md)."""
         c, s, R = math.cos(car.angle), math.sin(car.angle), RADAR_RANGE
         best = [None] * SECTORS
         for o in self.cars:
