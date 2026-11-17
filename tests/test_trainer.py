@@ -114,7 +114,7 @@ def _slot_brain(path, n_in=31, n_out=12):
 
 
 @pytest.mark.parametrize("trainer", ["default", "minimal"])
-def test_a_2_slot_brain_moves_to_the_sector_radar(trainer, tmp_path):
+def test_a_2_slot_brain_moves_to_the_newest_senses(trainer, tmp_path):
     start = _slot_brain(tmp_path / "old.json")
     assert engine.Brain(json.loads(start.read_text())).gen == 7
     session = write_session(tmp_path / "s", "n1", start_brain=start,
@@ -122,11 +122,22 @@ def test_a_2_slot_brain_moves_to_the_sector_radar(trainer, tmp_path):
     cmd = [sys.executable, "-m", "neuroprix.train"] if trainer == "default" else [sys.executable, str(ROOT / "examples" / "minimal_trainer.py")]
     train(cmd, session)
     b = engine.Brain(check_brain(tmp_path / "s" / "brain.json", "n1"))
-    assert b.gen == 11 and b.layout == "combined"   # (the sector radar; it keeps its own layout)
+    assert b.gen == 15 and b.layout == "combined"   # (the sector radar and the heading sense; it keeps its own layout)
 
 
-@pytest.mark.parametrize("cls,kind", [("n4", 8), ("n3", 9), ("n2", 10), ("n1", 11)])
-def test_new_brains_have_the_sector_radar(cls, kind, tmp_path):
+@pytest.mark.parametrize("trainer", ["default", "minimal"])
+def test_a_sector_radar_brain_gets_the_heading_sense(trainer, tmp_path):
+    start = _slot_brain(tmp_path / "old.json", n_in=51)
+    assert engine.Brain(json.loads(start.read_text())).gen == 11
+    session = write_session(tmp_path / "s", "n1", start_brain=start,
+                            settings={"updates": 2, "batch": 2, "eval_every": 2, "traffic": 1, "max_steps": 60, "seeds": [101]})
+    cmd = [sys.executable, "-m", "neuroprix.train"] if trainer == "default" else [sys.executable, str(ROOT / "examples" / "minimal_trainer.py")]
+    train(cmd, session)
+    assert engine.Brain(check_brain(tmp_path / "s" / "brain.json", "n1")).gen == 15
+
+
+@pytest.mark.parametrize("cls,kind", [("n4", 12), ("n3", 13), ("n2", 14), ("n1", 15)])
+def test_new_brains_have_the_newest_senses(cls, kind, tmp_path):
     session = write_session(tmp_path, cls)
     train([sys.executable, "-m", "neuroprix.train"], session)
     assert engine.Brain(check_brain(tmp_path / "brain.json", cls)).gen == kind

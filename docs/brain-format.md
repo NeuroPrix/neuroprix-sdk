@@ -10,19 +10,19 @@ The table shows the `combined` layout (one score per action); see [action layout
 
 | Class | Inputs | Hidden | Actions | Brain kind (`generation`) |
 |---|---|---|---|---|
-| N4 | 38 | 64 | 3 | 8 |
-| N3 | 42 | 64 | 9 | 9 |
-| N2 | 44 | 64 | 12 | 10 |
-| N1 | 51 | 64 | 12 | 11 |
+| N4 | 39 | 64 | 3 | 12 |
+| N3 | 43 | 64 | 9 | 13 |
+| N2 | 45 | 64 | 12 | 14 |
+| N1 | 52 | 64 | 12 | 15 |
 
 It's sent as JSON (`brain_out`, and the starting brain in a session):
 
 ```json
 {
   "name": "Dex Jango",
-  "arch": "mlp-44-64-12",
-  "generation": 10,
-  "fc1": {"weight": [[...44 numbers...], ... 64 rows], "bias": [...64 numbers...]},
+  "arch": "mlp-45-64-12",
+  "generation": 14,
+  "fc1": {"weight": [[...45 numbers...], ... 64 rows], "bias": [...64 numbers...]},
   "fc2": {"weight": [[...64 numbers...], ... 12 rows], "bias": [...12 numbers...]}
 }
 ```
@@ -43,10 +43,12 @@ The rules:
 - How you train is up to you, but the network must be this one: you can't add layers or units. (A class may get a
   new brain shape in a future season; the SDK and the server will say so.)
 
-Earlier brains still race, each sensing what it was built for: the 2-slot radar (kinds 3 for N4, 5 for N3, 6 for N2,
+Earlier brains still race, each sensing what it was built for: the sector radar without the heading sense (kinds
+8–11: 38, 42, 44 and 51 inputs), the 2-slot radar (kinds 3 for N4, 5 for N3, 6 for N2,
 7 for N1: 18, 22, 24 and 31 inputs; [what a driver senses](observations-and-actions.md#earlier-brains-the-2-slot-radar))
 and, older still, kinds 2 and 4 (N3, N2 before the corner-ahead sense). The default trainer moves any of them to the
-sector radar when it continues them (the new inputs start switched off, so it drives as before with nobody about).
+sector radar and the heading sense when it continues them (the new inputs start switched off, so it drives as before
+with nobody about).
 
 ## Action layouts
 
@@ -61,7 +63,7 @@ outputs become those controls. Leave it out and it's `combined`.
 | `three_head` | 3 steering, 3 pedal (gas, coast, brake), 2 boost (off, on) = 8 | the best of each of the three on its own | N2, N1 |
 
 ```json
-{"name": "Nora Summit", "arch": "mlp-51-64-8", "generation": 11, "action_layout": "three_head", "fc1": {...}, "fc2": {...}}
+{"name": "Nora Summit", "arch": "mlp-52-64-8", "generation": 15, "action_layout": "three_head", "fc1": {...}, "fc2": {...}}
 ```
 
 - **New N1 brains are `three_head`** by default (it drove cleanest in traffic in NeuroPrix's tests). The server says

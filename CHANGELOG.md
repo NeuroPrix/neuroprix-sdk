@@ -7,6 +7,14 @@ so you train on the same physics the races use.
 
 ## Unreleased
 
+- **Car-wide forward rays and the heading sense** (engine 2026.11.5;
+  [docs/observations-and-actions.md](docs/observations-and-actions.md#the-forward-beams)): the forward wall rays
+  (−45°, 0°, +45°) are beams the car's width, for every brain, so a rock just off the nose's line is seen; and new
+  brains have one more input, last, saying which way the track runs against the nose (kinds 12–15: N4 39 inputs, N3
+  43, N2 45, N1 52), so a car spun round knows which way to go. `neuroprix.env` and `neuroprix-train` default to it
+  (`--senses heading`); continuing a sector-radar brain adds it with zero weights (`neuroprix.brain.add_heading`; the
+  minimal example does it in NumPy), so it drives exactly as before until it learns to use it. Update the SDK: an
+  older engine senses differently from the races.
 - **The sector radar is every class's radar** (engine 2026.11.4): new brains in every class sense 8 sectors all round
   the car, behind too (N4 38 inputs, N3 42, N2 44, N1 51; [docs/observations-and-actions.md](docs/observations-and-actions.md)).
   `neuroprix.env` gives every class the sector radar by default, `neuroprix-train --senses sectors` is the default,

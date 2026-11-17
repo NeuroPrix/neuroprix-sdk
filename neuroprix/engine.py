@@ -24,7 +24,7 @@ import numpy as np
 # The engine's version: bump it whenever the physics, the circuits or what drivers sense changes (the same number is in
 # game/index.html as ENGINE_VERSION). Runners report theirs, and the Train page flags a runner whose engine is out of date
 # (it would be training on different physics than the races use).
-ENGINE_VERSION = "2026.11.4"   # (2026.11.4: every class senses with the sector radar)
+ENGINE_VERSION = "2026.11.5"   # (2026.11.5: car-wide forward rays; the heading sense, kinds 12-15)
 
 W, H = 900, 600                # default world (training gyms); Grand Prix circuits carry their own "size"
 MAX_SPEED, ACCEL, TURN_DRAG, TURN_RATE, MIN_SPEED = 5.0, 0.12, 0.975, 0.055, 1.2
@@ -32,6 +32,10 @@ CAR_L, CAR_W, RAY_LEN, ACTION_REPEAT = 18, 10, 250, 4
 FPS = 60                       # physics frames per second
 WRONG_WAY_PX, OIL_GRIP = 120, 0.35
 RAY_ANGLES = [math.radians(d) for d in (-90, -45, 0, 45, 90)]
+# The forward rays (-45, 0, 45 degrees: RAY_ANGLES[1:4]) are BEAMS the car's width: three parallel rays, from the nose's
+# centre and half the car's width to either side, the shortest reading counting. A rock just off the nose's line, which
+# one ray would pass, is seen (such rocks caused nearly every wreck). Every kind of brain senses this.
+BEAM_RAYS, BEAM_HALF = (1, 2, 3), CAR_W / 2
 # generation 2: steering x pedal, contacts, radar (see PHYS in game/index.html)
 BRAKE, COAST_DRAG, SCRUB, TURN_FULL_SPEED, STEER_RATE = 0.12, 0.999, 0.985, 1.2, 0.15   # gentle brake; lifting barely slows
 LAT_GRIP = 0.12                    # N3/N2: most sideways acceleration the tyres hold; caps the turn rate at speed
@@ -671,6 +675,10 @@ OBS_N1 = OBS_F1C + 2 * len(CORNER_LOOK) + 1
 # 8-sector one (32): kinds 8 = N4, 9 = N3, 10 = N2, 11 = N1
 SECTOR_EXTRA = SECTORS * SECTOR_INPUTS - RADAR_SLOTS * 6
 OBS_N4S, OBS_N3S, OBS_N2S, OBS_N1S = OBS_F3 + SECTOR_EXTRA, OBS_F2C + SECTOR_EXTRA, OBS_F1C + SECTOR_EXTRA, OBS_N1 + SECTOR_EXTRA
+# The heading sense (kinds 12 = N4, 13 = N3, 14 = N2, 15 = N1): the sector-radar senses + one last
+# input, which way the track runs against the car's nose (Car.heading): 0.5 straight along it, below 0.5 the track runs
+# to the left, above to the right, 0 or 1 facing backwards. A car spun round by a hit knows which way to go.
+OBS_N4H, OBS_N3H, OBS_N2H, OBS_N1H = OBS_N4S + 1, OBS_N3S + 1, OBS_N2S + 1, OBS_N1S + 1
 # The car's controls each decision are steering (left / straight / right), pedal (gas / coast / brake) and boost
 # (off / on), held as one action number: pedal x 3 + steer, pedal 3 being gas with boost (boost does nothing with coast
 # or brake: the car can't boost and brake at once). A brain's ACTION LAYOUT says how its outputs map onto them
@@ -712,23 +720,27 @@ def norm_class(c, default: str | None = None):
 
 
 def tier_of_gen(gen: int) -> str:
-    return "N1" if gen in (7, 11) else "N2" if gen in (4, 6, 10) else "N3" if gen in (2, 5, 9) else "N4"
+    return "N1" if gen in (7, 11, 15) else "N2" if gen in (4, 6, 10, 14) else "N3" if gen in (2, 5, 9, 13) else "N4"
 
 
 def has_pedals(gen: int) -> bool:
-    return gen in (2, 4, 5, 6, 7, 9, 10, 11)
+    return gen in (2, 4, 5, 6, 7, 9, 10, 11, 13, 14, 15)
 
 
 def is_f1(gen: int) -> bool:   # (the battery and boost: N2 and N1)
-    return gen in (4, 6, 7, 10, 11)
+    return gen in (4, 6, 7, 10, 11, 14, 15)
 
 
 def sees_hills(gen: int) -> bool:
-    return gen in (7, 11)
+    return gen in (7, 11, 15)
 
 
 def sees_corners(gen: int) -> bool:
-    return gen in (5, 6, 7, 9, 10, 11)
+    return gen in (5, 6, 7, 9, 10, 11, 13, 14, 15)
+
+
+def sees_heading(gen: int) -> bool:   # (which way the track runs against the nose: kinds 12-15)
+    return gen >= 12
 
 
 def sector_radar(gen: int) -> bool:   # (the 8-sector radar instead of the 2 nearest cars ahead)
@@ -799,7 +811,7 @@ class Brain:
             raise ValueError("not a NeuroPrix brain (unknown action layout)")
         # (the kind from the inputs: each count belongs to one kind, N3 / N4 / N4 classic told apart by their combined outputs)
         gen = {6: 1, OBS_V2: 2, OBS_F3: 3, OBS_F1: 4, OBS_F2C: 5, OBS_F1C: 6, OBS_N1: 7,
-               OBS_N4S: 8, OBS_N3S: 9, OBS_N2S: 10, OBS_N1S: 11}.get(n_in, 0)
+               OBS_N4S: 8, OBS_N3S: 9, OBS_N2S: 10, OBS_N1S: 11, OBS_N4H: 12, OBS_N3H: 13, OBS_N2H: 14, OBS_N1H: 15}.get(n_in, 0)
         self.gen = gen if gen and layout_outputs(gen, self.layout) == n_out else 0
         self.tier = tier_of_gen(self.gen)
         if (not self.gen or self.b1.shape != (h,) or self.w2.shape != (n_out, h) or self.b2.shape != (n_out,)
@@ -1013,7 +1025,15 @@ class Car:
     def sense(self, world) -> None:
         c, s = math.cos(self.angle), math.sin(self.angle)
         fx, fy = self.x + c * CAR_L / 2, self.y + s * CAR_L / 2
-        self.sensors = [r4(self._cast(fx, fy, math.cos(self.angle + o), math.sin(self.angle + o)) / RAY_LEN) for o in RAY_ANGLES]
+        out = []
+        for i, o in enumerate(RAY_ANGLES):
+            dx, dy = math.cos(self.angle + o), math.sin(self.angle + o)
+            d = self._cast(fx, fy, dx, dy)
+            if i in BEAM_RAYS:   # a beam the car's width: its two edges too, the shortest counts
+                px, py = -dy * BEAM_HALF, dx * BEAM_HALF
+                d = min(d, self._cast(fx + px, fy + py, dx, dy), self._cast(fx - px, fy - py, dx, dy))
+            out.append(r4(d / RAY_LEN))
+        self.sensors = out
         if self.gen != 1:   # N4 classic has no radar
             self.radar = world.sectors_for(self) if sector_radar(self.gen) else world.radar_for(self)
 
@@ -1051,7 +1071,18 @@ class Car:
             o += self.corner_ahead()
         if sees_hills(self.gen):   # N1: its slope and bank ahead, and the tyres' load now
             o += self.hills_ahead()
+        if sees_heading(self.gen):   # which way the track runs against the nose
+            o.append(self.heading())
         return o
+
+    def heading(self) -> float:
+        """Which way the track runs against the car's nose, 0..1: 0.5 straight along it, 0.25 the track runs 90 degrees
+        to the left, 0.75 to the right, 0 / 1 backwards (the angle from the nose to the direction of the track's
+        segment under the car, / 2 pi, + 0.5). Mirrors heading() in game/index.html."""
+        P, n, k = self.track.pts, len(self.track.pts), self.seg
+        tx, ty = P[(k + 1) % n][0] - P[k][0], P[(k + 1) % n][1] - P[k][1]
+        c, s = math.cos(self.angle), math.sin(self.angle)
+        return r4(0.5 + math.atan2(c * ty - s * tx, c * tx + s * ty) / (2 * math.pi))
 
     def hills_ahead(self) -> list:
         """N1: the road's grade and bank at CORNER_LOOK px ahead (0.5 = flat), then the tyres' load (0.5 = normal)."""

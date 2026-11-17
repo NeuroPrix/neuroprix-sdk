@@ -41,7 +41,7 @@ from torch.distributions import Categorical
 
 from neuroprix.browser_env import RaceEnv, load_track_spec
 from neuroprix.env import SimEnv, sim   # (sim: the race engine)
-from neuroprix.brain import DEFAULT_LAYOUT, GEN_OF_SHAPE, LAYOUTS, LEGACY, N_HIDDEN, PEDALS, SENSES, TIER_OF_GEN, TIERS, RaceBrain, gen_of, generation, heads_action, layout_outputs, load_layout, load_weights, pick_action, relayout, save_brain, state_to_obs, to_sectors  # noqa: E402
+from neuroprix.brain import DEFAULT_LAYOUT, SECTOR_TIERS, add_heading, GEN_OF_SHAPE, LAYOUTS, LEGACY, N_HIDDEN, PEDALS, SENSES, TIER_OF_GEN, TIERS, RaceBrain, gen_of, generation, heads_action, layout_outputs, load_layout, load_weights, pick_action, relayout, save_brain, state_to_obs, to_sectors  # noqa: E402
 
 # Rewards (per step of 4 frames). Further along the track is a better episode.
 # A step with no new best distance pays R_IDLE. A step that advances pays for every
@@ -129,7 +129,7 @@ class TrainPolicy(nn.Module):
     A training action is the heads' choices in mixed radix (steer + 3 x pedal [+ 9 x boost]); env_action turns it into
     the car's action."""
 
-    def __init__(self, tier: str, senses: str = "sectors", layout: str | None = None):
+    def __init__(self, tier: str, senses: str = "heading", layout: str | None = None):
         super().__init__()
         self.tier = tier
         self.layout = layout or "combined"   # (what the exported brain declares)
@@ -266,7 +266,7 @@ def _write_traces(job: dict, spec: dict, traces: list[dict]) -> None:
 
 def collect(job: dict) -> dict:
     """Play some episodes with the given weights. Returns trajectories as plain lists (cheap to send)."""
-    tier, senses = job["tier"], job.get("senses", "sectors")
+    tier, senses = job["tier"], job.get("senses", "heading")
     policy = TrainPolicy(tier, senses, job.get("layout"))
     gen, critic = policy.gen, Critic(policy.shape[0])
     policy.load_state_dict(job["policy"])
@@ -659,10 +659,11 @@ def main() -> None:
     ap.add_argument("--tier", type=str.lower, choices=["n4", "n3", "n2", "n1"], default="n3",
                     help="n4: steering only (fast to train); n3: steering + pedals; n2: + battery boost and slipstream inputs")
     ap.add_argument("--traffic", type=int, default=4, help="cars per episode, all driven by this driver (1 = alone; at most 10)")
-    ap.add_argument("--senses", choices=["slots", "sectors"], default="sectors",
-                    help="the radar: 8 sectors all round the car (the default, docs/observations-and-actions.md) or the earlier one "
-                         "on the 2 nearest cars ahead (slots: for experiments). A resumed 2-slot brain is moved to the "
-                         "sector radar, keeping everything else it learned")
+    ap.add_argument("--senses", choices=["slots", "sectors", "heading"], default="heading",
+                    help="heading (the default): the 8-sector radar all round the car (docs/observations-and-actions.md) and the "
+                         "heading sense (which way the track runs against the nose); sectors: without the heading sense; "
+                         "slots: the earlier radar on the 2 nearest cars ahead (for experiments). A resumed brain is "
+                         "moved up to these senses, the new inputs starting switched off and everything it learned kept")
     ap.add_argument("--starts", default="", help="each episode's start, weighted, e.g. grid:0.4,rolling:0.3,random:0.3 "
                     "(grid: standing at the line; rolling: moving, somewhere round; random: standing, somewhere round; default random)")
     ap.add_argument("--league", action="append", default=[], help="league opponents: brain .json files or folders of them (repeatable)")
@@ -805,8 +806,11 @@ def main() -> None:
     if args.resume:   # a brain keeps its sector radar and its action layout unless told otherwise
         try:
             src_layout = load_layout(args.resume)
-            if args.senses == "slots" and load_weights(args.resume)["fc1.weight"].shape[1] == SENSES["sectors"][tier][0]:
+            n_in = load_weights(args.resume)["fc1.weight"].shape[1]
+            if args.senses == "slots" and n_in == SENSES["sectors"][tier][0]:
                 args.senses = "sectors"
+            if n_in == SENSES["heading"][tier][0]:   # (never takes a sense away)
+                args.senses = "heading"
         except (ValueError, KeyError):
             pass   # (reported below)
         if args.layout is None and src_layout != "combined":
@@ -832,11 +836,16 @@ def main() -> None:
             shape = TIERS[tier]   # (then on to the sector radar, below)
             say(f"upgrading the brain: {extra} new inputs (the corners ahead), starting switched off", event="note",
                 message="upgraded the brain with the corner-ahead sense")
-        if args.senses == "sectors" and shape == TIERS[tier] and sd["fc1.weight"].shape[0] == N_HIDDEN:
+        if args.senses in ("sectors", "heading") and shape == TIERS[tier] and sd["fc1.weight"].shape[0] == N_HIDDEN:
             sd = to_sectors(sd)   # today's radar -> the sector radar (docs/observations-and-actions.md)
-            shape = (policy.shape[0], shape[1])
+            shape = (SECTOR_TIERS[tier][0], shape[1])
             say("moving the brain to the sector radar: its old radar dropped, 8 sectors all round starting switched off",
                 event="note", message="moved the brain to the sector radar")
+        if args.senses == "heading" and shape[0] == SECTOR_TIERS[tier][0] and sd["fc1.weight"].shape[0] == N_HIDDEN:
+            sd = add_heading(sd)   # + which way the track runs, its weights 0: it drives exactly as before
+            shape = (policy.shape[0], shape[1])
+            say("adding the heading sense (which way the track runs), starting switched off", event="note",
+                message="added the heading sense")
         if src_layout != policy.layout and shape[0] == policy.shape[0]:
             try:
                 sd = relayout(sd, src_layout, policy.layout, policy.pedals)

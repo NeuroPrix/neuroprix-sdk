@@ -7,7 +7,8 @@ Tiers (like the N4 / N3 / N2 ladder; the brain's shape says which it is):
   N4 classic   6 inputs -> 3 actions   the first drivers: wall rays + speed, no radar (still races in N4)
 Internally a brain's "generation" is its kind: 1 = N4 classic, 2 = N3, 3 = N4, 4 = N2.
 The sector-radar generation (kinds 8 = N4, 9 = N3, 10 = N2, 11 = N1; docs/observations-and-actions.md) has the same senses with
-the 2-slot radar (12 inputs) swapped for 8 sectors all round the car (32): 20 more inputs in each class.
+the 2-slot radar (12 inputs) swapped for 8 sectors all round the car (32): 20 more inputs in each class. Kinds 12-15
+add the heading sense, one last input (which way the track runs against the nose): what new brains are.
 
 N3 in detail:
   Input  (19): 5 wall rays [L, diag-L, front, diag-R, R]; a radar reporting the 2 nearest cars or
@@ -43,12 +44,17 @@ LEGACY = {"n3": (N_INPUTS, N_ACTIONS), "n2": F1_SHAPE}              # earlier br
 RADAR_AT, SLOT_RADAR, SECTOR_RADAR = 5, 12, 32
 EMPTY_SLOTS = [0, 1, 0.5, 0.5, 0.5, 0] * 2           # what today's radar reads with nobody in range
 SECTOR_TIERS = {t: (n + SECTOR_RADAR - SLOT_RADAR, a) for t, (n, a) in TIERS.items()}   # n4 38, n3 42, n2 44, n1 51
-SENSES = {"slots": TIERS, "sectors": SECTOR_TIERS}
+# the heading sense (kinds 12-15; backend/sim.py Car.heading): the sector-radar senses + one last input, which way the
+# track runs against the nose
+HEADING_TIERS = {t: (n + 1, a) for t, (n, a) in SECTOR_TIERS.items()}   # n4 39, n3 43, n2 45, n1 52
+SENSES = {"slots": TIERS, "sectors": SECTOR_TIERS, "heading": HEADING_TIERS}
 # Shapes with the "combined" action layout (below), the one every brain had before layouts
 GEN_OF_SHAPE = {GEN1: 1, (N_INPUTS, N_ACTIONS): 2, F3_SHAPE: 3, F1_SHAPE: 4, F2C_SHAPE: 5, F1C_SHAPE: 6, N1_SHAPE: 7,
-                SECTOR_TIERS["n4"]: 8, SECTOR_TIERS["n3"]: 9, SECTOR_TIERS["n2"]: 10, SECTOR_TIERS["n1"]: 11}
+                SECTOR_TIERS["n4"]: 8, SECTOR_TIERS["n3"]: 9, SECTOR_TIERS["n2"]: 10, SECTOR_TIERS["n1"]: 11,
+                HEADING_TIERS["n4"]: 12, HEADING_TIERS["n3"]: 13, HEADING_TIERS["n2"]: 14, HEADING_TIERS["n1"]: 15}
 GEN_OF_INPUTS = {shape[0]: g for shape, g in GEN_OF_SHAPE.items()}   # (each input count is one kind)
-TIER_OF_GEN = {1: "n4", 2: "n3", 3: "n4", 4: "n2", 5: "n3", 6: "n2", 7: "n1", 8: "n4", 9: "n3", 10: "n2", 11: "n1"}
+TIER_OF_GEN = {1: "n4", 2: "n3", 3: "n4", 4: "n2", 5: "n3", 6: "n2", 7: "n1", 8: "n4", 9: "n3", 10: "n2", 11: "n1",
+               12: "n4", 13: "n3", 14: "n2", 15: "n1"}
 PEDALS = {"n3": 3, "n2": 4, "n1": 4}                 # pedal choices per tier (N4 has none)
 # Action layouts (docs/brain-format.md; backend/sim.py LAYOUTS): how a brain's outputs map onto the car's controls.
 # The brain's JSON declares it ("action_layout"); none declared means "combined".
@@ -118,6 +124,13 @@ def to_sectors(sd: dict) -> dict:
     out["fc1.weight"] = torch.cat([W[:, :RADAR_AT], new, W[:, RADAR_AT + SLOT_RADAR:]], dim=1)
     out["fc1.bias"] = b + old @ torch.tensor(EMPTY_SLOTS, dtype=W.dtype)
     return out
+
+
+def add_heading(sd: dict) -> dict:
+    """A sector-radar brain (kinds 8-11) given the heading sense (kinds 12-15): one more input, last, its weights 0, so
+    it makes exactly the choices it made before until it trains with it."""
+    W = sd["fc1.weight"]
+    return {**sd, "fc1.weight": torch.cat([W, torch.zeros(W.shape[0], 1, dtype=W.dtype)], dim=1)}
 
 
 def heads_action(steer: int, pedal: int, boost: int) -> int:

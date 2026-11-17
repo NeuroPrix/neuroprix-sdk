@@ -40,7 +40,7 @@ Leave the runner running: it trains every session you send it, one at a time. Ct
 ~/neuroprix/bin/neuroprix-train --tier n1 --random-tracks --updates 20 --out my_driver.pth
 ```
 
-It prints each update and each check, and writes `my_driver.json`: an N1 brain with the all-round radar (51 inputs)
+It prints each update and each check, and writes `my_driver.json`: an N1 brain with the all-round radar and the heading sense (52 inputs)
 and three heads (8 outputs), [the brain format](docs/brain-format.md). Twenty updates only teach the first metres; a
 new N1 driver needs about 800 to get round. To give a driver on the site a new version, train it through the runner.
 
@@ -64,13 +64,14 @@ docker run -it -v neuroprix:/home/runner/.neuroprix neuroprix-runner --server ht
 
 | Class | Driver | Brain |
 |---|---|---|
-| N4 | Steering only (automatic throttle) | 38 → 64 → 3 |
-| N3 | Steering, throttle and brake | 42 → 64 → 9 |
-| N2 | N3 plus a battery: boost and slipstream | 44 → 64 → 12 |
-| N1 | N2 on terrain: hills, crests and banked corners, which it senses ahead | 51 → 64 → 12, or 8 with three heads (the default for a new N1 brain) |
+| N4 | Steering only (automatic throttle) | 39 → 64 → 3 |
+| N3 | Steering, throttle and brake | 43 → 64 → 9 |
+| N2 | N3 plus a battery: boost and slipstream | 45 → 64 → 12 |
+| N1 | N2 on terrain: hills, crests and banked corners, which it senses ahead | 52 → 64 → 12, or 8 with three heads (the default for a new N1 brain) |
 
 Every class's radar sees all round the car, behind too, in 8 sectors
-([docs/observations-and-actions.md](docs/observations-and-actions.md#the-radar-8-sectors-all-round)).
+([docs/observations-and-actions.md](docs/observations-and-actions.md#the-radar-8-sectors-all-round)); its forward wall
+rays are as wide as the car, and it knows which way the track runs against its nose.
 The last layer's shape depends on the brain's **action layout**: one score per move, or a group each for steering,
 pedal and boost ([docs/brain-format.md](docs/brain-format.md#action-layouts)).
 
