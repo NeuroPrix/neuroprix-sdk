@@ -114,7 +114,7 @@ def _slot_brain(path, n_in=31, n_out=12):
 
 
 @pytest.mark.parametrize("trainer", ["default", "minimal"])
-def test_a_2_slot_brain_moves_to_the_newest_senses(trainer, tmp_path):
+def test_a_2_slot_brain_keeps_its_own_senses_moved_up_to_the_heading_sense(trainer, tmp_path):
     start = _slot_brain(tmp_path / "old.json")
     assert engine.Brain(json.loads(start.read_text())).gen == 7
     session = write_session(tmp_path / "s", "n1", start_brain=start,
@@ -122,7 +122,8 @@ def test_a_2_slot_brain_moves_to_the_newest_senses(trainer, tmp_path):
     cmd = [sys.executable, "-m", "neuroprix.train"] if trainer == "default" else [sys.executable, str(ROOT / "examples" / "minimal_trainer.py")]
     train(cmd, session)
     b = engine.Brain(check_brain(tmp_path / "s" / "brain.json", "n1"))
-    assert b.gen == 15 and b.layout == "combined"   # (the sector radar and the heading sense; it keeps its own layout)
+    assert b.gen == 15 and b.layout == "combined"   # (the sector radar and the heading sense, not the senses a real car
+    # could measure, whose inputs mean other things; it keeps its own layout)
 
 
 @pytest.mark.parametrize("trainer", ["default", "minimal"])
@@ -136,7 +137,7 @@ def test_a_sector_radar_brain_gets_the_heading_sense(trainer, tmp_path):
     assert engine.Brain(check_brain(tmp_path / "s" / "brain.json", "n1")).gen == 15
 
 
-@pytest.mark.parametrize("cls,kind", [("n4", 12), ("n3", 13), ("n2", 14), ("n1", 15)])
+@pytest.mark.parametrize("cls,kind", [("n4", 16), ("n3", 17), ("n2", 18), ("n1", 19)])
 def test_new_brains_have_the_newest_senses(cls, kind, tmp_path):
     session = write_session(tmp_path, cls)
     train([sys.executable, "-m", "neuroprix.train"], session)

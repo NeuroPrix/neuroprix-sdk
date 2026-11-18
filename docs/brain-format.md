@@ -10,10 +10,10 @@ The table shows the `combined` layout (one score per action); see [action layout
 
 | Class | Inputs | Hidden | Actions | Brain kind (`generation`) |
 |---|---|---|---|---|
-| N4 | 39 | 64 | 3 | 12 |
-| N3 | 43 | 64 | 9 | 13 |
-| N2 | 45 | 64 | 12 | 14 |
-| N1 | 52 | 64 | 12 | 15 |
+| N4 | 46 | 64 | 3 | 16 |
+| N3 | 47 | 64 | 9 | 17 |
+| N2 | 49 | 64 | 12 | 18 |
+| N1 | 57 | 64 | 12 | 19 |
 
 It's sent as JSON (`brain_out`, and the starting brain in a session):
 
@@ -43,12 +43,15 @@ The rules:
 - How you train is up to you, but the network must be this one: you can't add layers or units. (A class may get a
   new brain shape in a future season; the SDK and the server will say so.)
 
-Earlier brains still race, each sensing what it was built for: the sector radar without the heading sense (kinds
+Earlier brains still race, each sensing what it was built for: the sector radar and the heading sense with the
+corners, grade and bank read off the map (kinds 12–15: 39, 43, 45 and 52 inputs;
+[what a driver senses](observations-and-actions.md#earlier-brains)), the same without the heading sense (kinds
 8–11: 38, 42, 44 and 51 inputs), the 2-slot radar (kinds 3 for N4, 5 for N3, 6 for N2,
 7 for N1: 18, 22, 24 and 31 inputs; [what a driver senses](observations-and-actions.md#earlier-brains-the-2-slot-radar))
-and, older still, kinds 2 and 4 (N3, N2 before the corner-ahead sense). The default trainer moves any of them to the
-sector radar and the heading sense when it continues them (the new inputs start switched off, so it drives as before
-with nobody about).
+and, older still, kinds 2 and 4 (N3, N2 before the corner-ahead sense). The default trainer keeps a continuing one in
+its own senses, moved up to the sector radar and the heading sense (kinds 12–15; the new inputs start switched off, so
+it drives as before with nobody about). It can't move to kinds 16–19, whose inputs mean other things: a brain with
+those senses starts from scratch.
 
 ## Action layouts
 
@@ -63,7 +66,7 @@ outputs become those controls. Leave it out and it's `combined`.
 | `three_head` | 3 steering, 3 pedal (gas, coast, brake), 2 boost (off, on) = 8 | the best of each of the three on its own | N2, N1 |
 
 ```json
-{"name": "Nora Summit", "arch": "mlp-52-64-8", "generation": 15, "action_layout": "three_head", "fc1": {...}, "fc2": {...}}
+{"name": "Nora Summit", "arch": "mlp-57-64-8", "generation": 19, "action_layout": "three_head", "fc1": {...}, "fc2": {...}}
 ```
 
 - **New N1 brains are `three_head`** by default (it drove cleanest in traffic in NeuroPrix's tests). The server says

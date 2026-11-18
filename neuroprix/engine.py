@@ -24,7 +24,7 @@ import numpy as np
 # The engine's version: bump it whenever the physics, the circuits or what drivers sense changes (the same number is in
 # game/index.html as ENGINE_VERSION). Runners report theirs, and the Train page flags a runner whose engine is out of date
 # (it would be training on different physics than the races use).
-ENGINE_VERSION = "2026.11.5"   # (2026.11.5: car-wide forward rays; the heading sense, kinds 12-15)
+ENGINE_VERSION = "2026.11.6"   # (2026.11.6: senses a real car could measure, kinds 16-19; banking only where the road curves)
 
 W, H = 900, 600                # default world (training gyms); Grand Prix circuits carry their own "size"
 MAX_SPEED, ACCEL, TURN_DRAG, TURN_RATE, MIN_SPEED = 5.0, 0.12, 0.975, 0.055, 1.2
@@ -36,6 +36,15 @@ RAY_ANGLES = [math.radians(d) for d in (-90, -45, 0, 45, 90)]
 # centre and half the car's width to either side, the shortest reading counting. A rock just off the nose's line, which
 # one ray would pass, is seen (such rocks caused nearly every wreck). Every kind of brain senses this.
 BEAM_RAYS, BEAM_HALF = (1, 2, 3), CAR_W / 2
+# Kinds 16-19 sense what a real car could measure (nothing read off the track map but the heading): a fan of 9 rays, the
+# side ones at -90 and +90 degrees and seven across the front, the 0 and +-20 degree ones car-wide beams.
+FAN_ANGLES = [math.radians(d) for d in (-90, -60, -40, -20, 0, 20, 40, 60, 90)]
+FAN_BEAMS = (3, 4, 5)
+YAW_FULL, SLIDE_FULL = 3.0, math.pi / 2   # yaw rate (rad/s) and sideslip (rad) that read fully one way
+SLIDE_MIN_SPEED = 0.1                     # slower than this (px a frame): no direction of travel, sideslip reads 0.5
+PITCH_FULL, ROLL_FULL = 0.15, 0.3         # N1: the car's tilt (rad) along and across that reads fully
+SIGHT_LOOK, SIGHT_FULL, SIGHT_STEP = (30, 90, 180), (0.05, 0.10, 0.15), 6   # N1 sight lines: px ahead, full scale (rad), samples
+BANK_FADE = 0.05   # banking only where the road curves: none below |K| = BANK_FADE / 2, all of it from BANK_FADE
 # generation 2: steering x pedal, contacts, radar (see PHYS in game/index.html)
 BRAKE, COAST_DRAG, SCRUB, TURN_FULL_SPEED, STEER_RATE = 0.12, 0.999, 0.985, 1.2, 0.15   # gentle brake; lifting barely slows
 LAT_GRIP = 0.12                    # N3/N2: most sideways acceleration the tyres hold; caps the turn rate at speed
@@ -581,7 +590,8 @@ class Track:
     z: list | None = None       # height at each point (px)
     grade: list | None = None   # slope along the lap (dz/ds)
     vcurv: list | None = None   # vertical curvature: crest < 0, dip > 0 (1/px)
-    bank: list | None = None    # radians, + leans into the corner (faster), - off-camber
+    bank: list | None = None    # radians, + leans into the corner (faster), - off-camber; 0 on straights (bank_fade)
+    roll: list | None = None    # the road's tilt across (radians, + = its left edge higher): sign(curvature) x bank
 
     def on_track(self, x: float, y: float) -> bool:
         if x < 0 or y < 0 or x >= self.W or y >= self.H:
@@ -642,7 +652,45 @@ def build_track(spec: dict) -> Track:
     if any(elev) or any(bank):   # N1: the road's heights and banks
         T.hilly, T.z = True, smooth_values(control, elev)
         T.grade, T.vcurv, T.bank = road_shape(pts, S, L, T.z, smooth_values(control, bank))
+        K = corner_curv(T)
+        T.bank = [b * bank_fade(k) for b, k in zip(T.bank, K)]   # banking only where the road curves
+        T.roll = [b if k > 0 else -b if k < 0 else 0.0 for b, k in zip(T.bank, K)]
     return T
+
+
+def bank_fade(k: float) -> float:
+    """How much of a bank the road keeps at this sharpness (corner_curv): none on a straight (|K| below BANK_FADE / 2),
+    all of it in a corner (BANK_FADE and up), a straight line between. Mirrors bankFade in the browser."""
+    return max(0.0, min(1.0, 2 * abs(k) / BANK_FADE - 1))
+
+
+def road_frame(T, s: float) -> tuple:
+    """The road at s px round the lap: the centre line's point, the normal to its right, its height and tan(roll), so
+    any point across it is (x + nx l, y + ny l, z - l tan(roll)). Mirrors roadFrame in the browser."""
+    S, n = T.S, len(T.S)
+    s = ((s % T.L) + T.L) % T.L
+    lo, hi = 0, n - 1
+    while lo < hi:
+        m = (lo + hi + 1) >> 1
+        if S[m] <= s:
+            lo = m
+        else:
+            hi = m - 1
+    j = (lo + 1) % n
+    seg = ((T.L if lo == n - 1 else S[j]) - S[lo]) or 1
+    t = (s - S[lo]) / seg
+    a, b = T.pts[lo], T.pts[j]
+    tx, ty = (b[0] - a[0]) / seg, (b[1] - a[1]) / seg
+    z = T.z[lo] + (T.z[j] - T.z[lo]) * t
+    r = T.roll[lo] + (T.roll[j] - T.roll[lo]) * t
+    return a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, -ty, tx, z, math.tan(r)
+
+
+def road_point(T, s: float, lat: float) -> tuple:
+    """A point of the road surface (hilly tracks): lat px to the right of the centre line at s px round the lap, as
+    (x, y, height). Mirrors roadPoint in the browser."""
+    x, y, nx, ny, z, tr = road_frame(T, s)
+    return x + nx * lat, y + ny * lat, z - lat * tr
 
 
 def spec_values(spec: dict, key: str, cap: float) -> list:
@@ -679,6 +727,11 @@ OBS_N4S, OBS_N3S, OBS_N2S, OBS_N1S = OBS_F3 + SECTOR_EXTRA, OBS_F2C + SECTOR_EXT
 # input, which way the track runs against the car's nose (Car.heading): 0.5 straight along it, below 0.5 the track runs
 # to the left, above to the right, 0 or 1 facing backwards. A car spun round by a hit knows which way to go.
 OBS_N4H, OBS_N3H, OBS_N2H, OBS_N1H = OBS_N4S + 1, OBS_N3S + 1, OBS_N2S + 1, OBS_N1S + 1
+# Senses a real car could measure (kinds 16 = N4, 17 = N3, 18 = N2, 19 = N1; docs/observations-and-actions.md): 9 rays, the
+# sector radar, speed, (wheel), yaw rate, sideslip, health, (battery, tow), (N1: pitch, roll, 6 sight lines), heading
+OBS_N4R = len(FAN_ANGLES) + SECTORS * SECTOR_INPUTS + 1 + 3 + 1
+OBS_N3R, OBS_N2R = OBS_N4R + 1, OBS_N4R + 3
+OBS_N1R = OBS_N2R + 2 + 2 * len(SIGHT_LOOK)
 # The car's controls each decision are steering (left / straight / right), pedal (gas / coast / brake) and boost
 # (off / on), held as one action number: pedal x 3 + steer, pedal 3 being gas with boost (boost does nothing with coast
 # or brake: the car can't boost and brake at once). A brain's ACTION LAYOUT says how its outputs map onto them
@@ -720,15 +773,15 @@ def norm_class(c, default: str | None = None):
 
 
 def tier_of_gen(gen: int) -> str:
-    return "N1" if gen in (7, 11, 15) else "N2" if gen in (4, 6, 10, 14) else "N3" if gen in (2, 5, 9, 13) else "N4"
+    return "N1" if gen in (7, 11, 15, 19) else "N2" if gen in (4, 6, 10, 14, 18) else "N3" if gen in (2, 5, 9, 13, 17) else "N4"
 
 
 def has_pedals(gen: int) -> bool:
-    return gen in (2, 4, 5, 6, 7, 9, 10, 11, 13, 14, 15)
+    return gen in (2, 4, 5, 6, 7, 9, 10, 11, 13, 14, 15, 17, 18, 19)
 
 
 def is_f1(gen: int) -> bool:   # (the battery and boost: N2 and N1)
-    return gen in (4, 6, 7, 10, 11, 14, 15)
+    return gen in (4, 6, 7, 10, 11, 14, 15, 18, 19)
 
 
 def sees_hills(gen: int) -> bool:
@@ -739,8 +792,12 @@ def sees_corners(gen: int) -> bool:
     return gen in (5, 6, 7, 9, 10, 11, 13, 14, 15)
 
 
-def sees_heading(gen: int) -> bool:   # (which way the track runs against the nose: kinds 12-15)
+def sees_heading(gen: int) -> bool:   # (which way the track runs against the nose: kinds 12 and up)
     return gen >= 12
+
+
+def real_senses(gen: int) -> bool:   # (senses a real car could measure: kinds 16-19, docs/observations-and-actions.md)
+    return gen >= 16
 
 
 def sector_radar(gen: int) -> bool:   # (the 8-sector radar instead of the 2 nearest cars ahead)
@@ -811,7 +868,8 @@ class Brain:
             raise ValueError("not a NeuroPrix brain (unknown action layout)")
         # (the kind from the inputs: each count belongs to one kind, N3 / N4 / N4 classic told apart by their combined outputs)
         gen = {6: 1, OBS_V2: 2, OBS_F3: 3, OBS_F1: 4, OBS_F2C: 5, OBS_F1C: 6, OBS_N1: 7,
-               OBS_N4S: 8, OBS_N3S: 9, OBS_N2S: 10, OBS_N1S: 11, OBS_N4H: 12, OBS_N3H: 13, OBS_N2H: 14, OBS_N1H: 15}.get(n_in, 0)
+               OBS_N4S: 8, OBS_N3S: 9, OBS_N2S: 10, OBS_N1S: 11, OBS_N4H: 12, OBS_N3H: 13, OBS_N2H: 14, OBS_N1H: 15,
+               OBS_N4R: 16, OBS_N3R: 17, OBS_N2R: 18, OBS_N1R: 19}.get(n_in, 0)
         self.gen = gen if gen and layout_outputs(gen, self.layout) == n_out else 0
         self.tier = tier_of_gen(self.gen)
         if (not self.gen or self.b1.shape != (h,) or self.w2.shape != (n_out, h) or self.b2.shape != (n_out,)
@@ -932,6 +990,7 @@ class Car:
     stun: int = 0         # frames left where the controls don't respond (after a hit)
     impact: float = 0.0   # hardest hit so far (1 = square-on at top speed)
     load: float = 1.0     # N1: the tyres' load (1 on the flat; less over a crest, more in a dip)
+    yaw: float = 0.0      # how far the body turned in the last frame (radians, + = to the right)
     # training only (agent/simenv.py; races leave these alone): a top-speed factor (slower traffic), whether to track
     # how risky the approach to a hit was, and which cars it touched this step
     cap_k: float = 1.0
@@ -982,7 +1041,7 @@ class Car:
         self.stun, self.impact = 0, 0.0
         self.battery, self.boosting = 1.0, False
         self.braking = False   # on the brake this frame (for brake lights and sounds in broadcasts; not physics)
-        self.grip_k, self.hold, self.load = 1.0, 0, 1.0
+        self.grip_k, self.hold, self.load, self.yaw = 1.0, 0, 1.0, 0.0
         self.seg = self.nearest_seg(self.x, self.y)
         s0 = self.project_s(self.x, self.y)
         self.prev_s = s0
@@ -1026,10 +1085,11 @@ class Car:
         c, s = math.cos(self.angle), math.sin(self.angle)
         fx, fy = self.x + c * CAR_L / 2, self.y + s * CAR_L / 2
         out = []
-        for i, o in enumerate(RAY_ANGLES):
+        angles, beams = (FAN_ANGLES, FAN_BEAMS) if real_senses(self.gen) else (RAY_ANGLES, BEAM_RAYS)
+        for i, o in enumerate(angles):
             dx, dy = math.cos(self.angle + o), math.sin(self.angle + o)
             d = self._cast(fx, fy, dx, dy)
-            if i in BEAM_RAYS:   # a beam the car's width: its two edges too, the shortest counts
+            if i in beams:   # a beam the car's width: its two edges too, the shortest counts
                 px, py = -dy * BEAM_HALF, dx * BEAM_HALF
                 d = min(d, self._cast(fx + px, fy + py, dx, dy), self._cast(fx - px, fy - py, dx, dy))
             out.append(r4(d / RAY_LEN))
@@ -1056,6 +1116,8 @@ class Car:
         return float(RAY_LEN)
 
     def obs(self) -> list:
+        if real_senses(self.gen):
+            return self.obs_real()
         o = list(self.sensors)
         if sector_radar(self.gen):   # 8 sectors x 4 (World.sectors_for)
             o += self.radar if self.radar else EMPTY_SECTOR * SECTORS
@@ -1074,6 +1136,71 @@ class Car:
         if sees_heading(self.gen):   # which way the track runs against the nose
             o.append(self.heading())
         return o
+
+    def obs_real(self) -> list:
+        """Kinds 16-19 (docs/observations-and-actions.md): only what a real car could measure, and the heading. Mirrors obsReal
+        in the browser."""
+        o = list(self.sensors) + (self.radar if self.radar else EMPTY_SECTOR * SECTORS)
+        o.append(r4(self.speed / MAX_SPEED))
+        if has_pedals(self.gen):
+            o.append(r4((self.steer + 1) / 2))
+        o.append(r4(0.5 + 0.5 * max(-1.0, min(1.0, self.yaw * FPS / YAW_FULL))))
+        o.append(self.sideslip())
+        o.append(r4(self.health))
+        if is_f1(self.gen):
+            o += [r4(self.battery), r4(self.slip)]
+        if tier_of_gen(self.gen) == "N1":
+            o += self.tilt_and_sight()
+        o.append(self.heading())
+        return o
+
+    def sideslip(self) -> float:
+        """The angle from the nose to the direction of travel: 0.5 going where it points, above 0.5 travelling to the
+        right of the nose; +-90 degrees reads fully. 0.5 when (nearly) stopped, and always for N4 (it can't slide)."""
+        if not has_pedals(self.gen) or self.speed < SLIDE_MIN_SPEED:
+            return 0.5
+        d = math.atan2(math.sin(self.dir - self.angle), math.cos(self.dir - self.angle))
+        return r4(0.5 + 0.5 * max(-1.0, min(1.0, d / SLIDE_FULL)))
+
+    def tilt_and_sight(self) -> list:
+        """N1, kinds 19: pitch, roll, then sight lines to the left road edge 30, 90, 180 px ahead and the same on the
+        right: each line's elevation angle against the car's own plane (the road's tangent plane under it), the highest
+        point on the way counting when a crest hides the end (the brow). 0.5 = level / in the car's plane. Mirrors
+        tiltAndSight in the browser."""
+        T = self.track
+        if not T.hilly:
+            return [0.5] * (2 + 2 * len(SIGHT_LOOK))
+        P, n, k = T.pts, len(T.pts), self.seg
+        ax, ay = P[k]
+        bx, by = P[(k + 1) % n]
+        sl = math.hypot(bx - ax, by - ay) or 1
+        tx, ty = (bx - ax) / sl, (by - ay) / sl
+        nx, ny = -ty, tx   # (to the right of the track)
+        tr = math.tan(T.roll[k])
+        gx, gy = T.grade[k] * tx - tr * nx, T.grade[k] * ty - tr * ny   # the surface's slope under the car (uphill)
+        c, s = math.cos(self.angle), math.sin(self.angle)
+        pitch = math.atan(gx * c + gy * s)
+        roll = math.atan(gx * s - gy * c)   # (+ = the right side lower: the slope towards the car's left)
+        out = [r4(0.5 + 0.5 * max(-1.0, min(1.0, pitch / PITCH_FULL))), r4(0.5 + 0.5 * max(-1.0, min(1.0, roll / ROLL_FULL)))]
+        Nl = math.sqrt(gx * gx + gy * gy + 1)
+        s_car = T.S[k] + (self.x - ax) * tx + (self.y - ay) * ty
+        ahead = [road_frame(T, s_car + d) for d in range(SIGHT_STEP, SIGHT_LOOK[-1] + 1, SIGHT_STEP)]   # shared by all six
+        hl, hw = CAR_L / 2, CAR_W / 2
+        for side in (-1, 1):   # left, then right
+            x0, y0 = self.x + c * hl - s * hw * side, self.y + s * hl + c * hw * side
+            l0 = (x0 - ax) * nx + (y0 - ay) * ny
+            h0 = road_point(T, T.S[k] + (x0 - ax) * tx + (y0 - ay) * ty, l0)[2]
+            l1 = side * T.width / 2
+            for D, full in zip(SIGHT_LOOK, SIGHT_FULL):
+                best = -math.inf
+                for i in range(D // SIGHT_STEP):
+                    px, py, qx, qy, z, tr = ahead[i]
+                    lat = l0 + (l1 - l0) * (i + 1) * SIGHT_STEP / D
+                    vx, vy, vz = px + qx * lat - x0, py + qy * lat - y0, z - lat * tr - h0
+                    v = math.sqrt(vx * vx + vy * vy + vz * vz) or 1
+                    best = max(best, math.asin(max(-1.0, min(1.0, (vz - gx * vx - gy * vy) / (v * Nl)))))
+                out.append(r4(0.5 + 0.5 * max(-1.0, min(1.0, best / full))))
+        return out
 
     def heading(self) -> float:
         """Which way the track runs against the car's nose, 0..1: 0.5 straight along it, 0.25 the track runs 90 degrees
@@ -1123,6 +1250,7 @@ class Car:
         if self.hold > 0:   # reacting to lights out
             self.hold -= 1
             self.frames += 1
+            self.yaw = 0.0
             self.last_improve, self.vx, self.vy = self.frames, 0.0, 0.0
             return
         stunned = self.stun > 0   # just after a hit: the controls don't respond
@@ -1181,11 +1309,10 @@ class Car:
             delta = self.steer * MAX_STEER * grip
             if self.speed != 0:
                 lim = LAT_GRIP * grip / self.speed
-                if hill and self.steer != 0:   # banking: more grip turning into the bank, less off-camber
-                    K = corner_curv(T)[k]
-                    if abs(K) > 0.05:
-                        side = 1 if (self.steer > 0) == (K > 0) else -1
-                        lim = max(0.2 * lim, lim + BANK_GRIP * math.sin(T.bank[k]) * side / self.speed)
+                if hill and self.steer != 0 and T.bank[k] != 0:   # banking: more grip turning into the bank, less off-camber
+                    K = corner_curv(T)[k]   # (the bank fades out below |K| = BANK_FADE, so it's 0 on a straight)
+                    side = 1 if (self.steer > 0) == (K > 0) else -1
+                    lim = max(0.2 * lim, lim + BANK_GRIP * math.sin(T.bank[k]) * side / self.speed)
                 if delta != 0:
                     self.angle += max(-lim * YAW_K, min(lim * YAW_K, (self.speed / WHEELBASE) * math.tan(delta)))
                 slip0 = math.atan2(math.sin(self.angle - self.dir), math.cos(self.angle - self.dir))
@@ -1233,6 +1360,7 @@ class Car:
         if not self.dead and self.distance >= T.laps * T.L:
             self.finished, self.reason = True, "finished"
         self.vx, self.vy = self.x - ox, self.y - oy
+        self.yaw = math.atan2(math.sin(self.angle - oa), math.cos(self.angle - oa))
 
     def pit_enter(self, lane: dict) -> bool:
         """Called in and at the lane's start (and not on its last lap): into the pit lane. True if it turned in."""
@@ -1270,7 +1398,7 @@ class Car:
         """One frame in the pit lane: driven down it at the limit, stopped and repaired at the box, then out. A team has
         one box: a car that reaches it while its teammate is being serviced waits behind (pit state 4) until the
         teammate leaves ("double stacking"), then is serviced. Mirrors Car.pitFrame in the browser."""
-        T, ox, oy = self.track, self.x, self.y
+        T, ox, oy, oa = self.track, self.x, self.y, self.angle
         u, v = self.pit_u, self.speed
         self.braking = False
         if self.pit == 1:
@@ -1310,6 +1438,7 @@ class Car:
         self.max_distance = max(self.max_distance, self.distance)
         self.last_improve = self.frames
         self.vx, self.vy = self.x - ox, self.y - oy
+        self.yaw = math.atan2(math.sin(self.angle - oa), math.cos(self.angle - oa))
         if self.pit == 3 and u >= lane["len"]:   # back on the road
             self.pit, self.pit_stops = 0, self.pit_stops + 1
             self.seg = self.nearest_seg(self.x, self.y)

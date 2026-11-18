@@ -8,7 +8,9 @@ Tiers (like the N4 / N3 / N2 ladder; the brain's shape says which it is):
 Internally a brain's "generation" is its kind: 1 = N4 classic, 2 = N3, 3 = N4, 4 = N2.
 The sector-radar generation (kinds 8 = N4, 9 = N3, 10 = N2, 11 = N1; docs/observations-and-actions.md) has the same senses with
 the 2-slot radar (12 inputs) swapped for 8 sectors all round the car (32): 20 more inputs in each class. Kinds 12-15
-add the heading sense, one last input (which way the track runs against the nose): what new brains are.
+add the heading sense, one last input (which way the track runs against the nose). Kinds 16-19 sense only what a real
+car could measure, plus the heading (docs/observations-and-actions.md): what new brains are. They share no input with the
+earlier kinds' meanings, so an earlier brain never carries over into them; it keeps training in its own senses.
 
 N3 in detail:
   Input  (19): 5 wall rays [L, diag-L, front, diag-R, R]; a radar reporting the 2 nearest cars or
@@ -47,14 +49,19 @@ SECTOR_TIERS = {t: (n + SECTOR_RADAR - SLOT_RADAR, a) for t, (n, a) in TIERS.ite
 # the heading sense (kinds 12-15; backend/sim.py Car.heading): the sector-radar senses + one last input, which way the
 # track runs against the nose
 HEADING_TIERS = {t: (n + 1, a) for t, (n, a) in SECTOR_TIERS.items()}   # n4 39, n3 43, n2 45, n1 52
-SENSES = {"slots": TIERS, "sectors": SECTOR_TIERS, "heading": HEADING_TIERS}
+# senses a real car could measure (kinds 16-19, backend/sim.py Car.obs_real): 9 rays, the sector radar, speed, (wheel),
+# yaw rate, sideslip, health, (battery, tow), (N1: pitch, roll, 6 sight lines), heading
+REAL_TIERS = {"n4": (46, 3), "n3": (47, 9), "n2": (49, 12), "n1": (57, 12)}
+SENSES = {"slots": TIERS, "sectors": SECTOR_TIERS, "heading": HEADING_TIERS, "real": REAL_TIERS}
+EARLIER_INPUTS = {t: {LEGACY.get(t, (0,))[0], TIERS[t][0], SECTOR_TIERS[t][0], HEADING_TIERS[t][0]} for t in TIERS}
 # Shapes with the "combined" action layout (below), the one every brain had before layouts
 GEN_OF_SHAPE = {GEN1: 1, (N_INPUTS, N_ACTIONS): 2, F3_SHAPE: 3, F1_SHAPE: 4, F2C_SHAPE: 5, F1C_SHAPE: 6, N1_SHAPE: 7,
                 SECTOR_TIERS["n4"]: 8, SECTOR_TIERS["n3"]: 9, SECTOR_TIERS["n2"]: 10, SECTOR_TIERS["n1"]: 11,
-                HEADING_TIERS["n4"]: 12, HEADING_TIERS["n3"]: 13, HEADING_TIERS["n2"]: 14, HEADING_TIERS["n1"]: 15}
+                HEADING_TIERS["n4"]: 12, HEADING_TIERS["n3"]: 13, HEADING_TIERS["n2"]: 14, HEADING_TIERS["n1"]: 15,
+                REAL_TIERS["n4"]: 16, REAL_TIERS["n3"]: 17, REAL_TIERS["n2"]: 18, REAL_TIERS["n1"]: 19}
 GEN_OF_INPUTS = {shape[0]: g for shape, g in GEN_OF_SHAPE.items()}   # (each input count is one kind)
 TIER_OF_GEN = {1: "n4", 2: "n3", 3: "n4", 4: "n2", 5: "n3", 6: "n2", 7: "n1", 8: "n4", 9: "n3", 10: "n2", 11: "n1",
-               12: "n4", 13: "n3", 14: "n2", 15: "n1"}
+               12: "n4", 13: "n3", 14: "n2", 15: "n1", 16: "n4", 17: "n3", 18: "n2", 19: "n1"}
 PEDALS = {"n3": 3, "n2": 4, "n1": 4}                 # pedal choices per tier (N4 has none)
 # Action layouts (docs/brain-format.md; backend/sim.py LAYOUTS): how a brain's outputs map onto the car's controls.
 # The brain's JSON declares it ("action_layout"); none declared means "combined".

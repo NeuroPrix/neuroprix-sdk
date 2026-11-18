@@ -11,7 +11,7 @@ import pytest
 
 import neuroprix
 from neuroprix import engine
-from neuroprix.brain import HEADING_TIERS, SECTOR_TIERS, TIERS, RaceBrain, save_brain
+from neuroprix.brain import REAL_TIERS, SECTOR_TIERS, TIERS, RaceBrain, save_brain
 from neuroprix.env import SimEnv
 from neuroprix.runner import VERSION, session_settings
 
@@ -68,7 +68,7 @@ def test_engine_senses_and_steps_every_class(cls):
     env.setup_world({"seed": 202}, cars=2, tier=cls)
     states = env.reset_world()
     assert len(states) == 2
-    n_in, n_actions = HEADING_TIERS[cls]   # (every class senses with the sector radar and the heading sense)
+    n_in, n_actions = REAL_TIERS[cls]   # (every class's new brains: what a real car could measure, and the heading)
     assert len(states[0]["obs"]) == n_in
     for _ in range(20):
         states = env.step_world([n_actions - 1, 0])

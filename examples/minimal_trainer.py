@@ -14,7 +14,8 @@ import numpy as np
 
 from neuroprix.env import SimEnv
 
-SHAPES = {"n4": (39, 12), "n3": (43, 13), "n2": (45, 14), "n1": (52, 15)}   # inputs (sector radar + heading), brain kind
+SHAPES = {"n4": (46, 16), "n3": (47, 17), "n2": (49, 18), "n1": (57, 19)}   # a new brain: inputs, kind (what a real car measures)
+HEADING = {"n4": (39, 12), "n3": (43, 13), "n2": (45, 14), "n1": (52, 15)}   # an earlier brain: sector radar + heading
 SECTORS = {"n4": 38, "n3": 42, "n2": 44, "n1": 51}   # inputs of a sector-radar brain without the heading sense
 PEDALS = {"n4": 0, "n3": 3, "n2": 4, "n1": 4}
 SLOTS = {"n4": 18, "n3": 22, "n2": 24, "n1": 31}   # inputs of an earlier brain, with the 2-slot radar
@@ -73,9 +74,9 @@ def to_json(br, name, kind, layout):
             "fc2": {"weight": br["w2"].tolist(), "bias": br["b2"].tolist()}}
 
 
-def drive(env, br, spec, cls, layout, steps=600):
-    """How far the brain gets round the circuit alone (its best action each decision)."""
-    env.setup_world(spec, 1, tier=cls)
+def drive(env, br, spec, cls, kind, layout, steps=600):
+    """How far the brain gets round the circuit alone (its best action each decision), sensing as its kind does."""
+    env.setup_world(spec, 1, tier=cls, gen=kind)
     s = env.reset_world()[0]
     for _ in range(steps):
         if s["dead"] or s["finished"]:
@@ -106,14 +107,16 @@ def main():
             br = to_sectors(br)
         if br["w1"].shape[1] == SECTORS[cls]:
             br = add_heading(br)
+        if br["w1"].shape[1] == HEADING[cls][0]:   # an earlier brain keeps its own senses: they can't carry over
+            n_in, kind = HEADING[cls]
     else:
         br = new_brain(n_in, outputs(cls, layout), rng)
-    best = np.mean([drive(env, br, t, cls, layout) for t in tracks])
+    best = np.mean([drive(env, br, t, cls, kind, layout) for t in tracks])
     t0 = time.time()
     say(event="stage", message="Random search: keeps each small change to the brain that drives further")
     for update in range(1, int(st.get("updates", 150)) + 1):
         trial = {k: v + rng.normal(0, 0.02, v.shape) for k, v in br.items()}
-        score = np.mean([drive(env, trial, t, cls, layout) for t in tracks])
+        score = np.mean([drive(env, trial, t, cls, kind, layout) for t in tracks])
         if score > best:
             br, best = trial, score
             tmp = session["brain_out"] + ".tmp"   # write, then rename: the runner never reads half a file

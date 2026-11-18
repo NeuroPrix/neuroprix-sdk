@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import multiprocessing as mp
 import os
 import random
@@ -41,7 +42,7 @@ from torch.distributions import Categorical
 
 from neuroprix.browser_env import RaceEnv, load_track_spec
 from neuroprix.env import SimEnv, sim   # (sim: the race engine)
-from neuroprix.brain import DEFAULT_LAYOUT, SECTOR_TIERS, add_heading, GEN_OF_SHAPE, LAYOUTS, LEGACY, N_HIDDEN, PEDALS, SENSES, TIER_OF_GEN, TIERS, RaceBrain, gen_of, generation, heads_action, layout_outputs, load_layout, load_weights, pick_action, relayout, save_brain, state_to_obs, to_sectors  # noqa: E402
+from neuroprix.brain import DEFAULT_LAYOUT, EARLIER_INPUTS, SECTOR_TIERS, add_heading, GEN_OF_SHAPE, LAYOUTS, LEGACY, N_HIDDEN, PEDALS, SENSES, TIER_OF_GEN, TIERS, RaceBrain, gen_of, generation, heads_action, layout_outputs, load_layout, load_weights, pick_action, relayout, save_brain, state_to_obs, to_sectors  # noqa: E402
 
 # Rewards (per step of 4 frames). Further along the track is a better episode.
 # A step with no new best distance pays R_IDLE. A step that advances pays for every
@@ -129,7 +130,7 @@ class TrainPolicy(nn.Module):
     A training action is the heads' choices in mixed radix (steer + 3 x pedal [+ 9 x boost]); env_action turns it into
     the car's action."""
 
-    def __init__(self, tier: str, senses: str = "heading", layout: str | None = None):
+    def __init__(self, tier: str, senses: str = "real", layout: str | None = None):
         super().__init__()
         self.tier = tier
         self.layout = layout or "combined"   # (what the exported brain declares)
@@ -266,7 +267,7 @@ def _write_traces(job: dict, spec: dict, traces: list[dict]) -> None:
 
 def collect(job: dict) -> dict:
     """Play some episodes with the given weights. Returns trajectories as plain lists (cheap to send)."""
-    tier, senses = job["tier"], job.get("senses", "heading")
+    tier, senses = job["tier"], job.get("senses", "real")
     policy = TrainPolicy(tier, senses, job.get("layout"))
     gen, critic = policy.gen, Critic(policy.shape[0])
     policy.load_state_dict(job["policy"])
@@ -297,6 +298,14 @@ def collect(job: dict) -> dict:
                          gens=[league[i].gen if i in league else gen for i in range(n_cars)], rolling=rolling)
         slow |= set(league)   # (nobody learns from a league car's moves either)
         states = _ENV.reset_world()
+        if start == "spun" and hasattr(_ENV, "_cars"):   # about half the cars standing, turned 90-180 degrees off the track
+            for i, c in enumerate(_ENV._cars):
+                if i not in league and random.random() < 0.5:
+                    c.angle += random.choice((-1, 1)) * random.uniform(math.pi / 2, math.pi)
+                    c.dir, c.speed, c.vx, c.vy = c.angle, 0.0, 0.0, 0.0
+            for c in _ENV._cars:
+                c.sense(_ENV.world)
+            states = [_ENV._state(c) for c in _ENV._cars]
         n = len(states)
         last_touch = [[-10**6] * n for _ in range(n)]   # step when each pair last touched
         traj = [{"obs": [], "act": [], "logp": [], "val": [], "rew": [], "last_val": 0.0} for _ in range(n)]
@@ -389,7 +398,9 @@ def _league(paths: list) -> list:
 
 def _start_mode(starts) -> str:
     """One episode's start (--starts): "grid" (standing, on the race grid at the line), "rolling" (the grid somewhere
-    round the circuit, already moving) or "random" (standing, the grid somewhere round the circuit: the default)."""
+    round the circuit, already moving), "random" (standing, the grid somewhere round the circuit: the default) or
+    "spun" (as random, with about half the learner's cars turned 90-180 degrees off the track's direction: practice
+    at finding the way after a spin)."""
     if not starts:
         return "random"
     r, acc = random.random() * sum(w for _, w in starts), 0.0
@@ -659,13 +670,16 @@ def main() -> None:
     ap.add_argument("--tier", type=str.lower, choices=["n4", "n3", "n2", "n1"], default="n3",
                     help="n4: steering only (fast to train); n3: steering + pedals; n2: + battery boost and slipstream inputs")
     ap.add_argument("--traffic", type=int, default=4, help="cars per episode, all driven by this driver (1 = alone; at most 10)")
-    ap.add_argument("--senses", choices=["slots", "sectors", "heading"], default="heading",
-                    help="heading (the default): the 8-sector radar all round the car (docs/observations-and-actions.md) and the "
-                         "heading sense (which way the track runs against the nose); sectors: without the heading sense; "
-                         "slots: the earlier radar on the 2 nearest cars ahead (for experiments). A resumed brain is "
-                         "moved up to these senses, the new inputs starting switched off and everything it learned kept")
+    ap.add_argument("--senses", choices=["slots", "sectors", "heading", "real"], default=None,
+                    help="real (the default for a new brain): only what a real car could measure, and the heading "
+                         "(brain kinds 16-19, docs/observations-and-actions.md). heading: the 8-sector radar all round the car "
+                         "(docs/observations-and-actions.md) and the heading sense, kinds 12-15; sectors: without the heading sense; "
+                         "slots: the earlier radar on the 2 nearest cars ahead (for experiments). A resumed earlier brain "
+                         "keeps its own senses, moved up to the heading sense (the new inputs switched off, everything it "
+                         "learned kept); it can't move to real, whose inputs mean other things")
     ap.add_argument("--starts", default="", help="each episode's start, weighted, e.g. grid:0.4,rolling:0.3,random:0.3 "
-                    "(grid: standing at the line; rolling: moving, somewhere round; random: standing, somewhere round; default random)")
+                    "(grid: standing at the line; rolling: moving, somewhere round; random: standing, somewhere round; default random; "
+                    "spun: as random, about half the cars turned 90-180 degrees off the track's direction)")
     ap.add_argument("--league", action="append", default=[], help="league opponents: brain .json files or folders of them (repeatable)")
     ap.add_argument("--league-cars", type=int, default=0, help="cars per episode driven by league brains (not learned from)")
     ap.add_argument("--layout", choices=LAYOUTS, default=None,
@@ -764,8 +778,8 @@ def main() -> None:
     starts = []
     for part in filter(None, (p.strip() for p in args.starts.split(","))):
         mode, _, w = part.partition(":")
-        if mode not in ("grid", "rolling", "random"):
-            sys.exit(f"--starts: unknown start '{mode}' (grid, rolling or random)")
+        if mode not in ("grid", "rolling", "random", "spun"):
+            sys.exit(f"--starts: unknown start '{mode}' (grid, rolling, random or spun)")
         starts.append((mode, float(w or 1)))
     league = []
     for item in args.league:
@@ -807,6 +821,12 @@ def main() -> None:
         try:
             src_layout = load_layout(args.resume)
             n_in = load_weights(args.resume)["fc1.weight"].shape[1]
+            if n_in in EARLIER_INPUTS[tier]:   # an earlier brain keeps its own senses: it can't carry over to real
+                if args.senses == "real":
+                    sys.exit("--resume: this brain senses the track map (an earlier kind); the senses a real car could "
+                             "measure (--senses real) start from scratch instead")
+                if args.senses is None:
+                    args.senses = "heading"
             if args.senses == "slots" and n_in == SENSES["sectors"][tier][0]:
                 args.senses = "sectors"
             if n_in == SENSES["heading"][tier][0]:   # (never takes a sense away)
@@ -817,6 +837,8 @@ def main() -> None:
             args.layout = src_layout
     elif args.layout is None:   # a new brain: its class's default layout (N1: three_head)
         args.layout = DEFAULT_LAYOUT.get(tier)
+    if args.senses is None:   # a new brain, or one with the senses a real car could measure
+        args.senses = "real"
     try:
         policy = TrainPolicy(tier, args.senses, args.layout)
     except ValueError as e:

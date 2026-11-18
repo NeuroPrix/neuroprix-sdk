@@ -7,6 +7,16 @@ so you train on the same physics the races use.
 
 ## Unreleased
 
+- **Senses a real car could measure** (engine 2026.11.6;
+  [docs/observations-and-actions.md](docs/observations-and-actions.md#inputs-in-order)): new brains (kinds 16–19: N4 46
+  inputs, N3 47, N2 49, N1 57) read nothing off the track map but the heading. A fan of 9 wall rays (−90°, −60°, −40°,
+  −20°, 0°, +20°, +40°, +60°, +90°; the 0° and ±20° ones car-wide beams) replaces the corners-ahead input; every class
+  feels its yaw rate, sideslip and health; N1 gets its pitch and roll and six sight lines to the road edges 30, 90 and
+  180 px ahead (reading the brow when a crest hides the road) instead of the map's grade, bank and tyre load.
+  `neuroprix.env` and `neuroprix-train` default to them (`--senses real`); a continuing earlier brain keeps its own
+  senses (the minimal example too). Banking only counts where the road curves: a bank fades out as a bend straightens
+  and is zero on a straight, so gentle bends gain a little banked grip. Update the SDK: an older engine senses and
+  drives differently from the races.
 - **Car-wide forward rays and the heading sense** (engine 2026.11.5;
   [docs/observations-and-actions.md](docs/observations-and-actions.md#the-forward-beams)): the forward wall rays
   (−45°, 0°, +45°) are beams the car's width, for every brain, so a rock just off the nose's line is seen; and new

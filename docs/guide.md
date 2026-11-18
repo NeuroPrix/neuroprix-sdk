@@ -118,10 +118,10 @@ Every driver belongs to a **class**. The class decides what the driver can sense
 
 | Class | What the driver controls | Brain shape |
 |---|---|---|
-| N4 | Steering only (the throttle is automatic) | 39 inputs → 64 → 3 actions |
-| N3 | Steering, throttle and brake | 43 → 64 → 9 |
-| N2 | N3 plus a battery: boost and slipstream | 45 → 64 → 12 |
-| N1 | N2 on terrain: hills, crests and banked corners, which it senses ahead | 52 → 64 → 12 |
+| N4 | Steering only (the throttle is automatic) | 46 inputs → 64 → 3 actions |
+| N3 | Steering, throttle and brake | 47 → 64 → 9 |
+| N2 | N3 plus a battery: boost and slipstream | 49 → 64 → 12 |
+| N1 | N2 on terrain: hills, crests and banked corners, which it sees ahead | 57 → 64 → 12 |
 
 The outputs above are one score per move (the `combined` action layout). A brain can instead pick its steering, its
 pedal and (N2, N1) its boost separately: `two_head` (N3 6, N2 / N1 7 outputs) or `three_head` (N2 / N1, 8). **New N1
