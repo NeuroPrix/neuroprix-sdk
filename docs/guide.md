@@ -53,7 +53,7 @@ Check it worked:
 ~/neuroprix/bin/neuroprix-runner --version
 ```
 
-It prints something like `neuroprix-runner 0.2.0 (engine 2026.11.4)`.
+It prints something like `neuroprix-runner 0.3.0 (engine 2026.11.7)`.
 
 ### 2. Start the runner and link it to your account
 
@@ -129,8 +129,9 @@ brains are `three_head`**; a driver that keeps training keeps its layout unless 
 [action layouts](brain-format.md#action-layouts).
 
 Every class's radar sees all round the car, behind too, in 8 sectors
-([observations-and-actions.md](observations-and-actions.md#the-radar-8-sectors-all-round)). Brains made before it (with
-a radar on the 2 nearest cars ahead, 20 fewer inputs) still race; training one again moves it to the sector radar.
+([observations-and-actions.md](observations-and-actions.md#the-radar-8-sectors-all-round)). Every brain senses only
+what a real car could measure (kinds 16-19). Brains made for earlier senses no longer load: such a driver counts as
+untrained, and its next session trains a new brain.
 
 N4 learns fastest; N1 has the most to learn. You choose the class with the **Class** switch at the top of the site
 when you create the driver, and it doesn't change.
@@ -196,7 +197,7 @@ neuroprix-runner [--server URL] [--name NAME] [--workers N] [--trainer COMMAND] 
 ### What the runner prints
 
 ```
-22:41:07 NeuroPrix Runner 0.2.0: "my-pc" on https://neuroprix.com/api, 6 games in parallel, trainer: NeuroPrix PPO. Waiting for training sessions (Ctrl+C to quit).
+22:41:07 NeuroPrix Runner 0.3.0: "my-pc" on https://neuroprix.com/api, 6 games in parallel, trainer: NeuroPrix PPO. Waiting for training sessions (Ctrl+C to quit).
 22:43:15 training Dex Jango (N2), session a6480de05a
 22:44:02   update 25
 22:44:51   update 50

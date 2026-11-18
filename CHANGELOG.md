@@ -5,7 +5,7 @@ version may need you to change your own trainer; minor and patch versions don't.
 (`neuroprix.ENGINE_VERSION`, e.g. `2026.11.2`), shown by `neuroprix-runner --version`; when it changes, update the SDK
 so you train on the same physics the races use.
 
-## Unreleased
+## 0.3.0 (2026-11-18)
 
 - **Only the senses a real car could measure** (engine 2026.11.7): brain kinds 16–19 are the only ones. Brains of
   earlier kinds (1–15) are refused by `neuroprix.engine.Brain`, `neuroprix.brain.load_brain` and `neuroprix-train`
