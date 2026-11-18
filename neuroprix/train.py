@@ -14,7 +14,6 @@ The learner (PPO):
 Tiers (--tier): n4 = steering only with automatic throttle (3 choices, fast to train);
 n3 = steering and pedals (two separate choices while training, exported as one 9-output brain).
 The critic only helps training; the exported brain is the policy alone.
-agent/train_reinforce.py is the earlier, simpler learner (REINFORCE), kept for comparison.
 
 Examples
     python agent/train.py                                   # procedural circuit seed 1
@@ -42,7 +41,7 @@ from torch.distributions import Categorical
 
 from neuroprix.browser_env import RaceEnv, load_track_spec
 from neuroprix.env import SimEnv, sim   # (sim: the race engine)
-from neuroprix.brain import DEFAULT_LAYOUT, EARLIER_INPUTS, SECTOR_TIERS, add_heading, GEN_OF_SHAPE, LAYOUTS, LEGACY, N_HIDDEN, PEDALS, SENSES, TIER_OF_GEN, TIERS, RaceBrain, gen_of, generation, heads_action, layout_outputs, load_layout, load_weights, pick_action, relayout, save_brain, state_to_obs, to_sectors  # noqa: E402
+from neuroprix.brain import DEFAULT_LAYOUT, OLD_INPUTS, OLD_SENSES, GEN_OF_SHAPE, LAYOUTS, N_HIDDEN, PEDALS, SENSES, TIER_OF_GEN, TIERS, RaceBrain, gen_of, generation, heads_action, layout_outputs, load_layout, load_weights, pick_action, relayout, save_brain, state_to_obs  # noqa: E402
 
 # Rewards (per step of 4 frames). Further along the track is a better episode.
 # A step with no new best distance pays R_IDLE. A step that advances pays for every
@@ -81,7 +80,9 @@ R_STEER_FLIP = -1.0    # reversing the steering choice between decisions (left <
 DEFAULT_REWARDS = {"progress": R_PROGRESS, "alive": R_ALIVE, "fast": R_FAST, "fast_threshold": FAST_THRESHOLD,
                    "idle": R_IDLE, "dead": R_DEAD, "damage": R_DAMAGE, "finish": R_FINISH, "contact": R_CONTACT,
                    "steer_flip": R_STEER_FLIP, "wall": R_WALL, "overtake": R_OVERTAKE,
-                   "corner": R_CORNER, "lose_place": R_LOSE_PLACE, "crash": R_CRASH, "risk": R_RISK}
+                   "corner": R_CORNER, "lose_place": R_LOSE_PLACE, "crash": R_CRASH, "risk": R_RISK, "turnround": 0.0,
+                   "backwards": 0.0, "stand_wrong": 0.0}
+# (turnround: experiments only, off by default and not a session setting: docs/observations-and-actions.md)
 
 
 def _idle_clock(steps_left: int, gamma: float, idle: float = R_IDLE) -> float:
@@ -102,6 +103,10 @@ def reward_for(prev: dict, cur: dict, rw: dict | None = None, steps_left: int = 
     if cur["dead"]:
         return r + rw["dead"] + _idle_clock(steps_left, gamma, rw["idle"])
     r += rw.get("corner", 0) * 10 * cur.get("corner_over", 0)   # arriving at a corner too fast to make it
+    if rw.get("turnround") and "heading" in prev and "heading" in cur:   # experiments: a spun car turning back
+        off0, off1 = abs(prev["heading"] - 0.5), abs(cur["heading"] - 0.5)   # (0 along the road, 0.5 backwards)
+        if off0 > 30 / 360:   # pays for turning back towards the road's direction, costs the same for turning away
+            r += rw["turnround"] * 4 * (off0 - off1)
     gained = cur["distance"] - prev["distance"]
     if gained > 0:
         r += rw["alive"] + rw["progress"] * gained
@@ -109,6 +114,12 @@ def reward_for(prev: dict, cur: dict, rw: dict | None = None, steps_left: int = 
             r += rw["fast"]
     else:
         r += rw["idle"]
+    if rw.get("stand_wrong") and "heading" in cur and abs(cur["heading"] - 0.5) > 0.25 and cur["speed"] < 0.1:
+        r += rw["stand_wrong"]   # experiments: standing still facing more than 90 degrees off the road's direction
+    if rw.get("backwards") and "distance_now" in prev and "distance_now" in cur:   # experiments: ground lost costs
+        lost = cur["distance_now"] - prev["distance_now"]   # what ground gained pays (x this); "distance" is the furthest
+        if lost < 0:                                        # point so far, which never goes down
+            r += rw["backwards"] * rw["progress"] * lost
     if cur["finished"]:
         r += rw["finish"]
     return r
@@ -135,7 +146,7 @@ class TrainPolicy(nn.Module):
         self.tier = tier
         self.layout = layout or "combined"   # (what the exported brain declares)
         self.pedals = PEDALS.get(tier, 0)
-        n_in = SENSES[senses][tier][0]   # (the sector radar, docs/observations-and-actions.md; "slots": the earlier 2-slot radar)
+        n_in = SENSES[senses][tier][0]   # (the senses a real car could measure: docs/observations-and-actions.md)
         n_out = layout_outputs(tier, self.layout)
         if n_out is None:
             raise ValueError(f"the {self.layout} action layout isn't available in {tier.upper()}")
@@ -300,9 +311,10 @@ def collect(job: dict) -> dict:
         states = _ENV.reset_world()
         if start == "spun" and hasattr(_ENV, "_cars"):   # about half the cars standing, turned 90-180 degrees off the track
             for i, c in enumerate(_ENV._cars):
-                if i not in league and random.random() < 0.5:
+                if i not in league and random.random() < job.get("spun_share", 0.5):
                     c.angle += random.choice((-1, 1)) * random.uniform(math.pi / 2, math.pi)
                     c.dir, c.speed, c.vx, c.vy = c.angle, 0.0, 0.0, 0.0
+                    c.wrong_way_px = job.get("spun_room") or c.wrong_way_px   # (practice only: room to turn round)
             for c in _ENV._cars:
                 c.sense(_ENV.world)
             states = [_ENV._state(c) for c in _ENV._cars]
@@ -670,13 +682,9 @@ def main() -> None:
     ap.add_argument("--tier", type=str.lower, choices=["n4", "n3", "n2", "n1"], default="n3",
                     help="n4: steering only (fast to train); n3: steering + pedals; n2: + battery boost and slipstream inputs")
     ap.add_argument("--traffic", type=int, default=4, help="cars per episode, all driven by this driver (1 = alone; at most 10)")
-    ap.add_argument("--senses", choices=["slots", "sectors", "heading", "real"], default=None,
-                    help="real (the default for a new brain): only what a real car could measure, and the heading "
-                         "(brain kinds 16-19, docs/observations-and-actions.md). heading: the 8-sector radar all round the car "
-                         "(docs/observations-and-actions.md) and the heading sense, kinds 12-15; sectors: without the heading sense; "
-                         "slots: the earlier radar on the 2 nearest cars ahead (for experiments). A resumed earlier brain "
-                         "keeps its own senses, moved up to the heading sense (the new inputs switched off, everything it "
-                         "learned kept); it can't move to real, whose inputs mean other things")
+    ap.add_argument("--senses", choices=["real"], default="real",
+                    help="what the brain senses: only what a real car could measure, and the heading (brain kinds 16-19, "
+                         "docs/observations-and-actions.md; the only senses there are)")
     ap.add_argument("--starts", default="", help="each episode's start, weighted, e.g. grid:0.4,rolling:0.3,random:0.3 "
                     "(grid: standing at the line; rolling: moving, somewhere round; random: standing, somewhere round; default random; "
                     "spun: as random, about half the cars turned 90-180 degrees off the track's direction)")
@@ -731,6 +739,16 @@ def main() -> None:
     ap.add_argument("--wall", type=float, default=R_WALL, help="reward per physics frame touching a wall or rock (scraping)")
     ap.add_argument("--steer-flip", type=float, default=R_STEER_FLIP, help="reward for reversing the steering (left <-> right) between decisions")
     ap.add_argument("--critic-warmup", type=int, default=None, help="updates that train only the critic (default 10 when resuming)")
+    ap.add_argument("--backwards", type=float, default=0.0, help="experiments: a price on ground lost, this x the progress "
+                    "reward per px driven backwards (1: going back costs what going forward pays; 0: free until out)")
+    ap.add_argument("--stand-wrong", type=float, default=0.0, help="experiments: reward per step for standing still "
+                    "(under 10%% of top speed) facing more than 90 degrees off the road's direction (e.g. -3)")
+    ap.add_argument("--spun-share", type=float, default=0.5, help="experiments: the share of the learner's cars a spun "
+                    "start turns round (0.5: about half)")
+    ap.add_argument("--spun-room", type=float, default=0.0, help="experiments: how far back (px) a car started spun may go "
+                    "before it's out for the wrong way, in practice (0: the races' 120 px)")
+    ap.add_argument("--turnround", type=float, default=0.0, help="experiments: while more than 30 degrees off the road's "
+                    "direction, this x 4 x how far the car turned back towards it (the same cost for turning away)")
     ap.add_argument("--dead", type=float, default=R_DEAD, help="reward for being out (wrecked, stalled or wrong way)")
     ap.add_argument("--worker-timeout", type=float, default=900, help="seconds one update's games may take before the workers are restarted")
     ap.add_argument("--eval-every", type=int, default=10)
@@ -799,7 +817,8 @@ def main() -> None:
     rewards = {"progress": args.progress, "alive": args.alive, "fast": args.fast, "fast_threshold": args.fast_threshold,
                "idle": args.idle, "dead": args.dead, "damage": args.damage, "finish": args.finish, "contact": args.contact,
                "steer_flip": args.steer_flip, "wall": args.wall, "overtake": args.overtake,
-               "corner": args.corner, "lose_place": args.lose_place, "crash": args.crash, "risk": args.risk}
+               "corner": args.corner, "lose_place": args.lose_place, "crash": args.crash, "risk": args.risk,
+               "turnround": args.turnround, "backwards": args.backwards, "stand_wrong": args.stand_wrong}
     changed = {k: v for k, v in rewards.items() if v != DEFAULT_REWARDS[k]}
     if changed:
         say(f"custom rewards: {changed}", event="note", message="custom rewards: " + ", ".join(f"{k} {v:g}" for k, v in changed.items()))
@@ -817,28 +836,17 @@ def main() -> None:
         return round(args.learner_start + (1 - args.learner_start) * min(1.0, (update - 1) / args.learner_updates), 3)
     tier = args.tier
     src_layout = "combined"
-    if args.resume:   # a brain keeps its sector radar and its action layout unless told otherwise
+    if args.resume:   # a brain keeps its action layout unless told otherwise
         try:
             src_layout = load_layout(args.resume)
-            n_in = load_weights(args.resume)["fc1.weight"].shape[1]
-            if n_in in EARLIER_INPUTS[tier]:   # an earlier brain keeps its own senses: it can't carry over to real
-                if args.senses == "real":
-                    sys.exit("--resume: this brain senses the track map (an earlier kind); the senses a real car could "
-                             "measure (--senses real) start from scratch instead")
-                if args.senses is None:
-                    args.senses = "heading"
-            if args.senses == "slots" and n_in == SENSES["sectors"][tier][0]:
-                args.senses = "sectors"
-            if n_in == SENSES["heading"][tier][0]:   # (never takes a sense away)
-                args.senses = "heading"
+            if load_weights(args.resume)["fc1.weight"].shape[1] in OLD_INPUTS:   # an earlier kind: nothing carries over
+                sys.exit(f"--resume: {OLD_SENSES}")
         except (ValueError, KeyError):
             pass   # (reported below)
         if args.layout is None and src_layout != "combined":
             args.layout = src_layout
     elif args.layout is None:   # a new brain: its class's default layout (N1: three_head)
         args.layout = DEFAULT_LAYOUT.get(tier)
-    if args.senses is None:   # a new brain, or one with the senses a real car could measure
-        args.senses = "real"
     try:
         policy = TrainPolicy(tier, args.senses, args.layout)
     except ValueError as e:
@@ -850,24 +858,6 @@ def main() -> None:
         except ValueError as e:
             sys.exit(f"--resume: {e}")
         shape = (sd["fc1.weight"].shape[1], sd["fc2.weight"].shape[0])
-        if shape == LEGACY.get(tier) and sd["fc1.weight"].shape[0] == N_HIDDEN:
-            # an earlier brain of this class, without the corner-ahead sense: add those inputs switched off, so it drives
-            # exactly as before and learns to use them from here
-            extra = TIERS[tier][0] - shape[0]
-            sd = {**sd, "fc1.weight": torch.cat([sd["fc1.weight"], torch.zeros(N_HIDDEN, extra)], 1)}
-            shape = TIERS[tier]   # (then on to the sector radar, below)
-            say(f"upgrading the brain: {extra} new inputs (the corners ahead), starting switched off", event="note",
-                message="upgraded the brain with the corner-ahead sense")
-        if args.senses in ("sectors", "heading") and shape == TIERS[tier] and sd["fc1.weight"].shape[0] == N_HIDDEN:
-            sd = to_sectors(sd)   # today's radar -> the sector radar (docs/observations-and-actions.md)
-            shape = (SECTOR_TIERS[tier][0], shape[1])
-            say("moving the brain to the sector radar: its old radar dropped, 8 sectors all round starting switched off",
-                event="note", message="moved the brain to the sector radar")
-        if args.senses == "heading" and shape[0] == SECTOR_TIERS[tier][0] and sd["fc1.weight"].shape[0] == N_HIDDEN:
-            sd = add_heading(sd)   # + which way the track runs, its weights 0: it drives exactly as before
-            shape = (policy.shape[0], shape[1])
-            say("adding the heading sense (which way the track runs), starting switched off", event="note",
-                message="added the heading sense")
         if src_layout != policy.layout and shape[0] == policy.shape[0]:
             try:
                 sd = relayout(sd, src_layout, policy.layout, policy.pedals)
@@ -994,7 +984,8 @@ def main() -> None:
                      "log_dir": args.log_dir,
                      "rewards": rewards, "speed_cap": speed_cap(update), "fragile": update <= args.first_lessons,
                      "gamma": args.gamma, "slow_traffic": args.slow_traffic, "slow_speed": args.slow_speed,
-                     "senses": args.senses, "starts": starts, "league": league, "league_cars": args.league_cars,
+                     "senses": args.senses, "starts": starts, "league": league, "league_cars": args.league_cars, "spun_room": args.spun_room,
+                     "spun_share": args.spun_share,
                      "contact_blame": args.contact_blame, "layout": args.layout} for w in range(workers)]
             parts = gather([j for j in jobs if j["specs"]])
             trajs = [t for p in parts for t in p["traj"]]

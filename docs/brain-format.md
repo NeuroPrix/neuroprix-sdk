@@ -43,15 +43,9 @@ The rules:
 - How you train is up to you, but the network must be this one: you can't add layers or units. (A class may get a
   new brain shape in a future season; the SDK and the server will say so.)
 
-Earlier brains still race, each sensing what it was built for: the sector radar and the heading sense with the
-corners, grade and bank read off the map (kinds 12–15: 39, 43, 45 and 52 inputs;
-[what a driver senses](observations-and-actions.md#earlier-brains)), the same without the heading sense (kinds
-8–11: 38, 42, 44 and 51 inputs), the 2-slot radar (kinds 3 for N4, 5 for N3, 6 for N2,
-7 for N1: 18, 22, 24 and 31 inputs; [what a driver senses](observations-and-actions.md#earlier-brains-the-2-slot-radar))
-and, older still, kinds 2 and 4 (N3, N2 before the corner-ahead sense). The default trainer keeps a continuing one in
-its own senses, moved up to the sector radar and the heading sense (kinds 12–15; the new inputs start switched off, so
-it drives as before with nobody about). It can't move to kinds 16–19, whose inputs mean other things: a brain with
-those senses starts from scratch.
+Brains of earlier kinds (1–15, with other input counts: senses partly read off the track map) are refused, by the
+engine, the trainer and the server: "this brain was made for senses NeuroPrix no longer uses: train a new one". Start
+a new brain instead.
 
 ## Action layouts
 

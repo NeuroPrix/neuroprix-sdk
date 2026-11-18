@@ -11,7 +11,7 @@ import pytest
 
 import neuroprix
 from neuroprix import engine
-from neuroprix.brain import REAL_TIERS, SECTOR_TIERS, TIERS, RaceBrain, save_brain
+from neuroprix.brain import REAL_TIERS, TIERS, RaceBrain, save_brain
 from neuroprix.env import SimEnv
 from neuroprix.runner import VERSION, session_settings
 

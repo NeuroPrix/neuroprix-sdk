@@ -4,8 +4,8 @@ The car decides 15 times a second: each decision lasts 4 physics frames (60 fram
 
 ## Inputs, in order
 
-New brains sense only what a real car or its driver could measure, plus which way the race goes (brain kinds 16–19:
-N4 46 inputs, N3 47, N2 49, N1 57; engine 2026.11.6). Nothing is read off the track map but the heading.
+Every brain senses only what a real car or its driver could measure, plus which way the race goes (brain kinds 16–19:
+N4 46 inputs, N3 47, N2 49, N1 57; engine 2026.11.7). Nothing is read off the track map but the heading.
 
 | # | Input | Classes | Meaning |
 |---|---|---|---|
@@ -50,16 +50,9 @@ straight, whatever a track file says.
 
 ## Earlier brains
 
-Earlier brains still race, each sensing what it was built for, and `neuroprix-train` keeps a continuing one in its own
-senses (an earlier brain's inputs mean other things, so it never moves to the ones above):
-
-- **Kinds 12–15** (N4 39 inputs, N3 43, N2 45, N1 52): 5 wall rays at −90°, −45°, 0°, +45°, +90° (the forward three
-  beams), the radar (6–37), speed (38), the wheel (39, N3 up), battery and tow (40–41, N2 and N1), the track's
-  sharpness 30, 90 and 180 px ahead read off the map (N3 up: 0.5 straight, above a right-hand bend), N1's grade and
-  bank at those points and its tyres' load, then the heading, last.
-- **Kinds 8–11** (N4 38, N3 42, N2 44, N1 51): the same without the heading. `neuroprix-train` adds it when it
-  continues one (`neuroprix.brain.add_heading`: one more input with zero weights, so it drives exactly as before until
-  it learns to use it), and the [minimal example](../examples/minimal_trainer.py) shows the same in NumPy.
+Brains of earlier kinds (1–15: 5 wall rays, and the corners, grade, bank and tyre load read off the track map, or the
+2-slot radar) are no longer used: the engine, the trainer and the server refuse them with "this brain was made for
+senses NeuroPrix no longer uses: train a new one". Train a new brain with the senses above.
 
 ## The radar: 8 sectors all round
 
@@ -84,16 +77,6 @@ In that order (front, front-left, left, rear-left, rear, rear-right, right, fron
 | sideways | 0.5 + its sideways speed relative to you ÷ 10 px a frame: above 0.5 = moving to your right | 0.5 |
 
 A wrecked car reads as a car standing still. Obstacles aren't on the radar (stones stop the wall rays).
-
-### The 2-slot radar, in the earliest brains
-
-Brains made before the sector radar (kinds 3–7: N4 18 inputs, N3 22, N2 24, N1 31) have a radar on the 2 nearest
-cars ahead or alongside instead of inputs 6–37: 12 inputs, 6 per car (present, distance ahead, sideways offset,
-closing speed, sideways speed, and "is a car", always 1; an empty slot reads 0, 1, 0.5, 0.5, 0.5, 0). Everything
-else is the same, 20 places earlier, without the heading. They still race, each sensing what it was built for.
-`neuroprix-train` moves one to the sector radar and the heading sense when it continues it
-(`neuroprix.brain.to_sectors`: the old radar's inputs dropped, the sectors starting switched off; then
-`add_heading`), and the [minimal example](../examples/minimal_trainer.py) shows the same in NumPy.
 
 ## Actions
 

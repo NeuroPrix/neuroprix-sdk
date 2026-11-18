@@ -1,25 +1,18 @@
 """RaceBrain: the small policy network that drives a NeuroPrix car.
 
-Tiers (like the N4 / N3 / N2 ladder; the brain's shape says which it is):
-  N4          18 inputs -> 3 actions   steering only, automatic throttle; wall rays + radar + speed
-  N3          19 inputs -> 9 actions   steering x pedals (accelerate / coast / brake); + steering wheel
-  N2          21 inputs -> 12 actions  N3 + battery and slipstream inputs; pedals accelerate / coast / brake / BOOST
-  N4 classic   6 inputs -> 3 actions   the first drivers: wall rays + speed, no radar (still races in N4)
-Internally a brain's "generation" is its kind: 1 = N4 classic, 2 = N3, 3 = N4, 4 = N2.
-The sector-radar generation (kinds 8 = N4, 9 = N3, 10 = N2, 11 = N1; docs/observations-and-actions.md) has the same senses with
-the 2-slot radar (12 inputs) swapped for 8 sectors all round the car (32): 20 more inputs in each class. Kinds 12-15
-add the heading sense, one last input (which way the track runs against the nose). Kinds 16-19 sense only what a real
-car could measure, plus the heading (docs/observations-and-actions.md): what new brains are. They share no input with the
-earlier kinds' meanings, so an earlier brain never carries over into them; it keeps training in its own senses.
+Classes (the brain's shape says which it is), all sensing only what a real car could measure, and the heading
+(docs/observations-and-actions.md; backend/sim.py Car.obs):
+  N4  46 inputs -> 3 actions   steering only, automatic throttle
+  N3  47 inputs -> 9 actions   steering x pedals (accelerate / coast / brake); + the steering wheel
+  N2  49 inputs -> 12 actions  N3 + battery and slipstream; pedals accelerate / coast / brake / BOOST
+  N1  57 inputs -> 12 actions  N2 + its tilt and 6 sight lines over the hills (or 8 with three heads, its default)
+Internally a brain's "generation" is its kind: 16 = N4, 17 = N3, 18 = N2, 19 = N1. Brains of earlier kinds (1-15, which
+read parts of their senses off the track map) are refused (OLD_SENSES).
 
-N3 in detail:
-  Input  (19): 5 wall rays [L, diag-L, front, diag-R, R]; a radar reporting the 2 nearest cars or
-               people (present, ahead, sideways, closing speed, sideways speed, is-a-car); own speed;
-               steering-wheel position (the wheel turns at a limited rate, so steering is smooth).
-               All in 0..1, computed by the game (state["obs"]).
-  Hidden (64): ReLU
-  Output (9):  steering (left / straight / right) x pedal (accelerate / coast / brake)
-N4 is the same without the wheel input and with 3 steering outputs (the throttle is automatic).
+  Input:  9 wall rays, the sector radar (8 x 4), speed, (wheel), yaw rate, sideslip, health, (battery, tow),
+          (N1: pitch, roll, 6 sight lines), heading. All in 0..1, computed by the game (state["obs"]).
+  Hidden: 64, ReLU
+  Output: steering (left / straight / right) x pedal, or one group per control (action layouts, below)
 """
 from __future__ import annotations
 
@@ -31,37 +24,16 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-N_INPUTS, N_HIDDEN, N_ACTIONS = 19, 64, 9          # N3 (generation 2)
-GEN1 = (6, 3)                                        # N4 classic (generation 1): inputs, actions
-F3_SHAPE = (18, 3)                                   # N4 (generation 3)
-F1_SHAPE = (N_INPUTS + 2, 12)                        # N2 (generation 4): + battery, tow; pedal x4 (boost)
-N_CORNER = 3                                         # the corner-ahead sense: track sharpness 30 / 90 / 180 px ahead
-F2C_SHAPE = (N_INPUTS + N_CORNER, N_ACTIONS)         # N3 with the corner sense (generation 5)
-F1C_SHAPE = (F1_SHAPE[0] + N_CORNER, 12)             # N2 with the corner sense (generation 6)
-N1_SHAPE = (F1C_SHAPE[0] + 2 * N_CORNER + 1, 12)     # N1 (generation 7): + grade and bank ahead, the tyres' load
-TIERS = {"n4": F3_SHAPE, "n3": F2C_SHAPE, "n2": F1C_SHAPE, "n1": N1_SHAPE}   # what training makes
-LEGACY = {"n3": (N_INPUTS, N_ACTIONS), "n2": F1_SHAPE}              # earlier brains of a class (no corner sense): they
-                                                                    # still race, and training upgrades them
-# the sector radar: 8 sectors x 4 numbers instead of 2 slots x 6 (radar inputs start at RADAR_AT, after the 5 wall rays)
-RADAR_AT, SLOT_RADAR, SECTOR_RADAR = 5, 12, 32
-EMPTY_SLOTS = [0, 1, 0.5, 0.5, 0.5, 0] * 2           # what today's radar reads with nobody in range
-SECTOR_TIERS = {t: (n + SECTOR_RADAR - SLOT_RADAR, a) for t, (n, a) in TIERS.items()}   # n4 38, n3 42, n2 44, n1 51
-# the heading sense (kinds 12-15; backend/sim.py Car.heading): the sector-radar senses + one last input, which way the
-# track runs against the nose
-HEADING_TIERS = {t: (n + 1, a) for t, (n, a) in SECTOR_TIERS.items()}   # n4 39, n3 43, n2 45, n1 52
-# senses a real car could measure (kinds 16-19, backend/sim.py Car.obs_real): 9 rays, the sector radar, speed, (wheel),
-# yaw rate, sideslip, health, (battery, tow), (N1: pitch, roll, 6 sight lines), heading
-REAL_TIERS = {"n4": (46, 3), "n3": (47, 9), "n2": (49, 12), "n1": (57, 12)}
-SENSES = {"slots": TIERS, "sectors": SECTOR_TIERS, "heading": HEADING_TIERS, "real": REAL_TIERS}
-EARLIER_INPUTS = {t: {LEGACY.get(t, (0,))[0], TIERS[t][0], SECTOR_TIERS[t][0], HEADING_TIERS[t][0]} for t in TIERS}
-# Shapes with the "combined" action layout (below), the one every brain had before layouts
-GEN_OF_SHAPE = {GEN1: 1, (N_INPUTS, N_ACTIONS): 2, F3_SHAPE: 3, F1_SHAPE: 4, F2C_SHAPE: 5, F1C_SHAPE: 6, N1_SHAPE: 7,
-                SECTOR_TIERS["n4"]: 8, SECTOR_TIERS["n3"]: 9, SECTOR_TIERS["n2"]: 10, SECTOR_TIERS["n1"]: 11,
-                HEADING_TIERS["n4"]: 12, HEADING_TIERS["n3"]: 13, HEADING_TIERS["n2"]: 14, HEADING_TIERS["n1"]: 15,
-                REAL_TIERS["n4"]: 16, REAL_TIERS["n3"]: 17, REAL_TIERS["n2"]: 18, REAL_TIERS["n1"]: 19}
+N_HIDDEN = 64
+# inputs, outputs ("combined" layout) of each class's brain: kinds 16-19
+TIERS = {"n4": (46, 3), "n3": (47, 9), "n2": (49, 12), "n1": (57, 12)}
+REAL_TIERS = TIERS   # (the same: the senses a real car could measure are the only ones)
+SENSES = {"real": TIERS}
+GEN_OF_SHAPE = {TIERS["n4"]: 16, TIERS["n3"]: 17, TIERS["n2"]: 18, TIERS["n1"]: 19}   # (with the "combined" layout)
 GEN_OF_INPUTS = {shape[0]: g for shape, g in GEN_OF_SHAPE.items()}   # (each input count is one kind)
-TIER_OF_GEN = {1: "n4", 2: "n3", 3: "n4", 4: "n2", 5: "n3", 6: "n2", 7: "n1", 8: "n4", 9: "n3", 10: "n2", 11: "n1",
-               12: "n4", 13: "n3", 14: "n2", 15: "n1", 16: "n4", 17: "n3", 18: "n2", 19: "n1"}
+TIER_OF_GEN = {16: "n4", 17: "n3", 18: "n2", 19: "n1"}
+OLD_INPUTS = (6, 18, 19, 21, 22, 24, 31, 38, 39, 42, 43, 44, 45, 51, 52)   # earlier kinds' input counts (refused)
+OLD_SENSES = "this brain was made for senses NeuroPrix no longer uses: train a new one"
 PEDALS = {"n3": 3, "n2": 4, "n1": 4}                 # pedal choices per tier (N4 has none)
 # Action layouts (docs/brain-format.md; backend/sim.py LAYOUTS): how a brain's outputs map onto the car's controls.
 # The brain's JSON declares it ("action_layout"); none declared means "combined".
@@ -89,7 +61,7 @@ PEDAL = ("accelerate", "coast", "brake", "boost")
 
 
 class RaceBrain(nn.Module):
-    def __init__(self, n_inputs: int = N_INPUTS, n_hidden: int = N_HIDDEN, n_actions: int = N_ACTIONS, layout: str = "combined"):
+    def __init__(self, n_inputs: int = TIERS["n3"][0], n_hidden: int = N_HIDDEN, n_actions: int = TIERS["n3"][1], layout: str = "combined"):
         super().__init__()
         self.layout = layout   # (how its outputs map onto the controls: LAYOUTS)
         self.fc1 = nn.Linear(n_inputs, n_hidden)
@@ -111,33 +83,13 @@ def tier_of(model: "RaceBrain") -> str:
     return TIER_OF_GEN.get(generation(model), "?")
 
 
-def state_to_obs(state: dict, gen: int = 2) -> torch.Tensor:
+def state_to_obs(state: dict, gen: int = 17) -> torch.Tensor:
     """Game state JSON -> input tensor (already normalised 0..1 by the game)."""
-    feats = [float(v) for v in state["sensors"]] + [float(state["speed"])] if gen == 1 else state["obs"]
+    feats = state["obs"]
     want = {g: n for n, g in GEN_OF_INPUTS.items()}[gen]
     if len(feats) != want:
         raise ValueError(f"expected {want} features, got {len(feats)}")
     return torch.tensor(feats, dtype=torch.float32).clamp_(0.0, 1.0)
-
-
-def to_sectors(sd: dict) -> dict:
-    """A brain of today's kind (2-slot radar) moved to the sector-radar kind of its class (docs/observations-and-actions.md): the weights from every input both kinds have are copied, the old radar's weights are dropped (what they added
-    with nobody in range is folded into the hidden biases) and the new radar's weights start at 0. With no car in
-    range it makes exactly the choices the old brain made with nobody in range."""
-    W, b = sd["fc1.weight"], sd["fc1.bias"]
-    old = W[:, RADAR_AT:RADAR_AT + SLOT_RADAR]
-    new = torch.zeros(W.shape[0], SECTOR_RADAR, dtype=W.dtype)
-    out = dict(sd)
-    out["fc1.weight"] = torch.cat([W[:, :RADAR_AT], new, W[:, RADAR_AT + SLOT_RADAR:]], dim=1)
-    out["fc1.bias"] = b + old @ torch.tensor(EMPTY_SLOTS, dtype=W.dtype)
-    return out
-
-
-def add_heading(sd: dict) -> dict:
-    """A sector-radar brain (kinds 8-11) given the heading sense (kinds 12-15): one more input, last, its weights 0, so
-    it makes exactly the choices it made before until it trains with it."""
-    W = sd["fc1.weight"]
-    return {**sd, "fc1.weight": torch.cat([W, torch.zeros(W.shape[0], 1, dtype=W.dtype)], dim=1)}
 
 
 def heads_action(steer: int, pedal: int, boost: int) -> int:
@@ -245,6 +197,8 @@ def load_brain(path: str | Path) -> RaceBrain:
     hidden, n_in = sd["fc1.weight"].shape
     n_out = sd["fc2.weight"].shape[0]
     layout = load_layout(path)
+    if n_in in OLD_INPUTS:
+        raise ValueError(OLD_SENSES)
     if not gen_of(n_in, n_out, layout):
         raise ValueError(f"not a NeuroPrix brain: {n_in} inputs and {n_out} outputs don't fit any class with the "
                          f"{layout} action layout")

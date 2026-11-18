@@ -15,7 +15,7 @@ from pathlib import Path
 from neuroprix import engine as sim
 
 GEN_OF_TIER = {"n4": 16, "n3": 17, "n2": 18, "n1": 19}   # each class's brain kind for new brains: the senses a real car could measure
-KINDS = (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19)   # brain kinds a training car can have (8-11: the sector radar; 12-15: + heading; 16-19: real senses)
+KINDS = (16, 17, 18, 19)   # brain kinds a training car can have (docs/observations-and-actions.md)
 MAX_CARS = 10                                         # a training field: up to a full race grid
 
 
@@ -162,10 +162,11 @@ class SimEnv:
             "health": r4(c.health), "damage": r4(c.damage), "hits": c.hits,
             "impact": r4(c.impact),
             "touched": [int(k) for k in c.touched],
+            "heading": c.heading(),   # (training only: which way the car points against the road; the turnround reward)
+            "distance_now": round(c.distance, 1),   # (training only: where it is now; "distance" is its furthest so far)
         }
-        if c.gen != 1:
-            st["obs"] = c.obs()
-            st["contacts"] = c.contacts
+        st["obs"] = c.obs()
+        st["contacts"] = c.contacts
         if not (c.dead or c.finished):
             st["corner_over"] = r4(c.corner_over())
             st["corner_need"] = r4(min(99.0, c.corner_need()))

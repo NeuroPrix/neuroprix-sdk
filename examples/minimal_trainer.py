@@ -14,12 +14,8 @@ import numpy as np
 
 from neuroprix.env import SimEnv
 
-SHAPES = {"n4": (46, 16), "n3": (47, 17), "n2": (49, 18), "n1": (57, 19)}   # a new brain: inputs, kind (what a real car measures)
-HEADING = {"n4": (39, 12), "n3": (43, 13), "n2": (45, 14), "n1": (52, 15)}   # an earlier brain: sector radar + heading
-SECTORS = {"n4": 38, "n3": 42, "n2": 44, "n1": 51}   # inputs of a sector-radar brain without the heading sense
+SHAPES = {"n4": (46, 16), "n3": (47, 17), "n2": (49, 18), "n1": (57, 19)}   # inputs, brain kind (docs/observations-and-actions.md)
 PEDALS = {"n4": 0, "n3": 3, "n2": 4, "n1": 4}
-SLOTS = {"n4": 18, "n3": 22, "n2": 24, "n1": 31}   # inputs of an earlier brain, with the 2-slot radar
-EMPTY_SLOTS = np.array([0, 1, 0.5, 0.5, 0.5, 0] * 2)   # what the 2-slot radar read with nobody in range
 HIDDEN = 64
 
 
@@ -27,20 +23,6 @@ def outputs(cls, layout):
     """How many scores a brain of this class has in this action layout (docs/brain-format.md#action-layouts)."""
     p = PEDALS[cls]
     return {"combined": 3 * p or 3, "two_head": 3 + p if p else None, "three_head": 8 if p == 4 else None}[layout]
-
-
-def to_sectors(br):
-    """An earlier 2-slot-radar brain moved to the sector radar (as neuroprix.brain.to_sectors): its old radar inputs
-    (6-17) dropped, what they added with nobody in range folded into the biases, 32 sector inputs starting at 0."""
-    w1 = br["w1"]
-    return {**br, "b1": br["b1"] + w1[:, 5:17] @ EMPTY_SLOTS,
-            "w1": np.concatenate([w1[:, :5], np.zeros((w1.shape[0], 32)), w1[:, 17:]], axis=1)}
-
-
-def add_heading(br):
-    """A sector-radar brain given the heading sense (as neuroprix.brain.add_heading): one more input, last, its weights
-    0, so it drives exactly as before until it learns to use it."""
-    return {**br, "w1": np.concatenate([br["w1"], np.zeros((br["w1"].shape[0], 1))], axis=1)}
 
 
 def act(scores, layout):
@@ -103,12 +85,8 @@ def main():
     if session.get("start_brain"):
         start = json.load(open(session["start_brain"]))
         br, layout = from_json(start), start.get("action_layout") or "combined"
-        if br["w1"].shape[1] == SLOTS[cls]:
-            br = to_sectors(br)
-        if br["w1"].shape[1] == SECTORS[cls]:
-            br = add_heading(br)
-        if br["w1"].shape[1] == HEADING[cls][0]:   # an earlier brain keeps its own senses: they can't carry over
-            n_in, kind = HEADING[cls]
+        if br["w1"].shape[1] != n_in:   # (a brain of an earlier kind: its senses aren't used any more)
+            raise SystemExit("this brain was made for senses NeuroPrix no longer uses: train a new one")
     else:
         br = new_brain(n_in, outputs(cls, layout), rng)
     best = np.mean([drive(env, br, t, cls, kind, layout) for t in tracks])
