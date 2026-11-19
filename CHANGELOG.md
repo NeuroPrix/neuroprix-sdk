@@ -5,7 +5,7 @@ version may need you to change your own trainer; minor and patch versions don't.
 (`neuroprix.ENGINE_VERSION`, e.g. `2026.11.2`), shown by `neuroprix-runner --version`; when it changes, update the SDK
 so you train on the same physics the races use.
 
-## 0.3.1 (unreleased)
+## 0.3.1 (2026-11-19)
 
 - **The first 20% of damage costs no speed, and the radar sees further ahead** (engine 2026.11.8): a car keeps all of
   its top speed down to 80% health (a dent in the body), and below that top speed falls evenly to half at zero, as
