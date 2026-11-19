@@ -5,6 +5,15 @@ version may need you to change your own trainer; minor and patch versions don't.
 (`neuroprix.ENGINE_VERSION`, e.g. `2026.11.2`), shown by `neuroprix-runner --version`; when it changes, update the SDK
 so you train on the same physics the races use.
 
+## 0.3.1 (unreleased)
+
+- **The first 20% of damage costs no speed, and the radar sees further ahead** (engine 2026.11.8): a car keeps all of
+  its top speed down to 80% health (a dent in the body), and below that top speed falls evenly to half at zero, as
+  before at zero. The radar's front, front-left and front-right sectors see 600 px (about 2 s at top speed) instead of
+  200 px, and their *near* reads by that range (1 − distance ÷ 600); the side and rear sectors stay at 200 px. The
+  inputs are the same, so brain kinds 16–19 and every saved brain still load, but a brain trained on 2026.11.7 reads a
+  car ahead as nearer than it is until it trains on the new engine. Update the SDK so you train on the physics the races use.
+
 ## 0.3.0 (2026-11-18)
 
 - **Only the senses a real car could measure** (engine 2026.11.7): brain kinds 16–19 are the only ones. Brains of

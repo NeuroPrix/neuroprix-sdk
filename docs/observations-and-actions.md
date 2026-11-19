@@ -5,7 +5,7 @@ The car decides 15 times a second: each decision lasts 4 physics frames (60 fram
 ## Inputs, in order
 
 Every brain senses only what a real car or its driver could measure, plus which way the race goes (brain kinds 16–19:
-N4 46 inputs, N3 47, N2 49, N1 57; engine 2026.11.7). Nothing is read off the track map but the heading.
+N4 46 inputs, N3 47, N2 49, N1 57; engine 2026.11.8). Nothing is read off the track map but the heading.
 
 | # | Input | Classes | Meaning |
 |---|---|---|---|
@@ -15,7 +15,7 @@ N4 46 inputs, N3 47, N2 49, N1 57; engine 2026.11.7). Nothing is read off the tr
 | 43 | Steering wheel | N3, N2, N1 | 0 = full left, 0.5 = straight, 1 = full right (the wheel turns at a limited rate) |
 | next | Yaw rate | all | How fast the body is turning, over the last frame: 0.5 = not turning, above 0.5 = turning right; ±3 rad/s reads 0 or 1 (the tyres hold about 2.3 rad/s at top speed, so a spin reads 0 or 1) |
 | next | Sideslip | all | The angle from the nose to the way the car is moving: 0.5 = going where it points, above 0.5 = moving to the right of the nose; ±90° reads 0 or 1. 0.5 when nearly stopped. N4 can't slide, so it reads 0.5 |
-| next | Health | all | 1 = undamaged. Damage cuts the car's top speed to (0.5 + 0.5 × health) of its best until a pit stop |
+| next | Health | all | 1 = undamaged. The first 20% of damage costs no speed; below 0.8, top speed falls evenly to half of its best at 0, until a pit stop |
 | next | Battery | N2, N1 | Charge left for boost |
 | next | Tow | N2, N1 | Slipstream from a car just ahead (1 = right behind it): you feel it as less drag |
 | next | Pitch | N1 | The car's tilt along its length: 0.5 = level, above = nose up; ±0.15 rad reads 0 or 1 |
@@ -56,8 +56,9 @@ senses NeuroPrix no longer uses: train a new one". Train a new brain with the se
 
 ## The radar: 8 sectors all round
 
-The circle round the car is cut into 8 sectors, and each reports the nearest car whose centre is in it, within
-200 px, behind as well as ahead.
+The circle round the car is cut into 8 sectors, and each reports the nearest car whose centre is in it, behind as well
+as ahead: within 600 px (about 2 s at top speed) in the front, front-left and front-right sectors, so you can see a car
+you're catching, and within 200 px in the other five.
 
 | Sector | Bearing from the nose (+ = right) |
 |---|---|
@@ -72,7 +73,7 @@ In that order (front, front-left, left, rear-left, rear, rear-right, right, fron
 | Input | Meaning | Empty sector |
 |---|---|---|
 | seen | 1 if a car is in the sector | 0 |
-| near | 1 − distance ÷ 200 px (centre to centre): 1 = touching | 0 |
+| near | 1 − distance ÷ that sector's range (600 px in front, 200 px elsewhere; centre to centre): 1 = touching | 0 |
 | closing | 0.5 + how fast the gap is shrinking ÷ 10 px a frame: above 0.5 = getting closer, whether it's catching you or you're catching it | 0.5 |
 | sideways | 0.5 + its sideways speed relative to you ÷ 10 px a frame: above 0.5 = moving to your right | 0.5 |
 
@@ -99,6 +100,7 @@ off-camber one less; banking only counts in corners (it fades out as a bend stra
 they always have.
 
 Walls and stones cost health by how hard you hit them (a square-on hit at top speed wrecks the car); touching another
-car costs both half their speed. Too fast for a corner and the car drifts wide. A wrecked car, one that makes no
+car costs both half their speed. The first 20% of damage is the body only and costs no speed; below 80% health top
+speed falls evenly to half at zero, until a pit stop. Too fast for a corner and the car drifts wide. A wrecked car, one that makes no
 progress for 10 seconds, or one going the wrong way is out. The full rules are the engine itself
 (`neuroprix.engine`): it's the same code the official races run.

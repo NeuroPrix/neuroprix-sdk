@@ -24,7 +24,7 @@ import numpy as np
 # The engine's version: bump it whenever the physics, the circuits or what drivers sense changes (the same number is in
 # game/index.html as ENGINE_VERSION). Runners report theirs, and the Train page flags a runner whose engine is out of date
 # (it would be training on different physics than the races use).
-ENGINE_VERSION = "2026.11.7"   # (2026.11.7: only the senses a real car could measure, kinds 16-19; earlier kinds refused)
+ENGINE_VERSION = "2026.11.8"   # (2026.11.8: the first 20% of damage costs no speed; the radar's three front sectors see 600 px)
 
 W, H = 900, 600                # default world (training gyms); Grand Prix circuits carry their own "size"
 MAX_SPEED, ACCEL, TURN_DRAG, TURN_RATE, MIN_SPEED = 5.0, 0.12, 0.975, 0.055, 1.2
@@ -50,13 +50,24 @@ TYRE_DRAG = 0.02                   # cornering costs speed (x grip-in-use square
 YAW_K, DRIFT_SCRUB, SLIDE_GRIP = 1.6, 0.015, 0.7   # drift: the body turns up to YAW_K x the grip, the path bends at most the
                                                  # grip (SLIDE_GRIP of it once sliding 0.4 rad); sliding costs DRIFT_SCRUB x |sin(slip)|
 WHEELBASE, MAX_STEER = 12.0, 0.6   # N3 bicycle: rear axle to front axle, front-wheel angle at full lock
-CAR_R, RADAR_RANGE = 5, 200
+CAR_R, RADAR_RANGE, RADAR_FRONT = 5, 200, 600   # the radar sees 600 px (about 2 s at top speed) in its front, front-left
+# and front-right sectors, so a driver can see a car a second or two up the road; 200 px to the sides and behind
+HEALTH_FREE = 0.8   # damage down to this health is body damage only and costs no speed; below it top speed falls evenly to half at 0
 # The sector radar (docs/observations-and-actions.md): the nearest car in each of 8 sectors round the car, all the
 # way round, 4 numbers each (seen, near, closing, sideways). Sectors by bearing from the nose (+ = right): front +-15 deg,
 # front diagonals to 60, sides to 120, rear diagonals to 160, rear the last 40. Chosen by comparing |ly| with lx times
 # these tangents (exact literals, the same in game/index.html), never by atan2, so both engines agree on a boundary.
 SECTORS, SECTOR_INPUTS = 8, 4
 TAN15, TAN60, TAN20 = 0.2679491924311227, 1.7320508075688772, 0.36397023426620234
+SECTOR_RANGE = (RADAR_FRONT, RADAR_FRONT, RADAR_RANGE, RADAR_RANGE, RADAR_RANGE, RADAR_RANGE, RADAR_RANGE, RADAR_FRONT)
+
+
+def health_speed(health: float) -> float:
+    """The share of top speed a car keeps at this health: all of it down to HEALTH_FREE (dents in the body), then
+    falling evenly to half at 0 (the engine and chassis). Mirrors healthSpeed in the browser."""
+    return 1.0 if health >= HEALTH_FREE else 0.5 + 0.5 * max(0.0, health) / HEALTH_FREE
+
+
 EMPTY_SECTOR = [0, 0, 0.5, 0.5]
 CONTACT_SLOWDOWN = 0.5
 # damage (every tier): walls, rocks and other cars cost health instead of ending the race (see PHYS in the browser)
@@ -1349,7 +1360,7 @@ class Car:
             self.prev_s = self.project_s(self.x, self.y)
 
     def top_speed(self) -> float:
-        return MAX_SPEED * (0.5 + 0.5 * self.health) * self.world_cap * self.cap_k * (1 + SLIP_BOOST * self.slip)   # world_cap, cap_k: training only
+        return MAX_SPEED * health_speed(self.health) * self.world_cap * self.cap_k * (1 + SLIP_BOOST * self.slip)   # world_cap, cap_k: training only
 
     def corner_need(self) -> float:
         """Training only: the fastest the car may go now and still brake in time for the corners ahead (inf: no
@@ -1574,11 +1585,12 @@ class World:
 
     def sectors_for(self, car: Car) -> list:
         """The sector radar: for each of the 8 sectors (front, front-left, left, rear-left, rear, rear-right,
-        right, front-right), the nearest car whose centre is in it within RADAR_RANGE: seen, near (1 - distance / range),
+        right, front-right), the nearest car whose centre is in it within that sector's range (RADAR_FRONT for the three
+        front sectors, RADAR_RANGE for the others): seen, near (1 - distance / that sector's range),
         closing (0.5 + how fast the distance shrinks / 2 top speeds) and sideways (0.5 + its velocity relative to this
         car across its axis, + = right / 2 top speeds). An empty sector reads EMPTY_SECTOR. Flat: 32 numbers.
         Mirrors World.sectorsFor in the browser (docs/observations-and-actions.md)."""
-        c, s, R = math.cos(car.angle), math.sin(car.angle), RADAR_RANGE
+        c, s = math.cos(car.angle), math.sin(car.angle)
         best = [None] * SECTORS
         for o in self.cars:
             if o is car or o.finished or o.pit or o.lifted:
@@ -1586,7 +1598,7 @@ class World:
             dx, dy = o.x - car.x, o.y - car.y
             lx, ly = dx * c + dy * s, -dx * s + dy * c
             d = math.hypot(lx, ly)
-            if d > R:
+            if d > RADAR_FRONT:
                 continue
             ay = abs(ly)
             if lx > 0 and ay <= lx * TAN15:
@@ -1599,7 +1611,8 @@ class World:
                 k = 3 if ly < 0 else 5                 # rear-left / rear-right
             else:
                 k = 2 if ly < 0 else 6                 # left / right
-            if best[k] is not None and best[k][0] <= d:
+            R = SECTOR_RANGE[k]
+            if d > R or best[k] is not None and best[k][0] <= d:
                 continue
             ovx, ovy = (0, 0) if o.dead else (o.vx, o.vy)
             rvx, rvy = ovx - car.vx, ovy - car.vy
