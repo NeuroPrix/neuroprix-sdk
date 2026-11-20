@@ -8,6 +8,7 @@ version = "0.3.1"
 description = "NeuroPrix SDK: train your NeuroPrix racing drivers on your own computer. The race engine, the default trainer and the runner."
 readme = "README.md"
 license = "Apache-2.0"
+authors = [{ name = "NeuroPrix", email = "support@neuroprix.com" }]
 license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.10"
 dependencies = ["numpy>=1.26", "torch>=2.2"]
