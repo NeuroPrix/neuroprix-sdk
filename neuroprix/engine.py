@@ -736,21 +736,25 @@ OLD_INPUTS = (6, 18, 19, 21, 22, 24, 31, 38, 39, 42, 43, 44, 45, 51, 52)   # the
 OLD_SENSES = "this brain was made for senses NeuroPrix no longer uses: train a new one"
 # The car's controls each decision are steering (left / straight / right), pedal (gas / coast / brake) and boost
 # (off / on), held as one action number: pedal x 3 + steer, pedal 3 being gas with boost (boost does nothing with coast
-# or brake: the car can't boost and brake at once). A brain's ACTION LAYOUT says how its outputs map onto them
-# (docs/brain-format.md); its JSON declares it ("action_layout"), and a brain without one is "combined":
-#   combined    one choice over every pedal x steering pair: 3 x pedals outputs (N2 / N1 12, N3 9; N4 3, steering)
-#   two_head    steering (3) + pedal (pedals: N2 / N1 gas, coast, brake, boost; N3 gas, coast, brake), each chosen alone
-#   three_head  steering (3) + pedal (gas, coast, brake) + boost (off, on): 8 outputs; classes with a battery only
+# or brake: the car can't boost and brake at once). Or BY DEGREES (PROP_BASE and up): steering in PROP_STEER levels
+# (full left .. full right), the pedal in PROP_PEDAL (full brake, half brake, coast, half throttle, full throttle) and
+# boost: PROP_BASE + steer + 7 x pedal + 35 x boost (controls). A brain's ACTION LAYOUT says how its outputs map onto
+# them (docs/brain-format.md); its JSON declares it ("action_layout"), and a brain without one is "combined". Each
+# build comes on/off or by degrees ("_prop"):
+#   combined     one choice over every pedal x steering pair (on/off: 3 x pedals outputs, N2 / N1 12, N3 9, N4 3;
+#                by degrees: 7 x pedal levels, N2 / N1 42, N3 35)
+#   two_head     a steering head and a pedal head, each chosen alone (N2 / N1: boost as the last pedal: full throttle
+#                with boost). On/off 3 + 4 (N3 3 + 3); by degrees 7 + 6 (N3 7 + 5)
+#   three_head   steering, pedal and boost (off, on) heads, classes with a battery only: on/off 3 + 3 + 2, by degrees
+#                7 + 5 + 2
 # Only these fixed shapes are ever loaded: a brain is plain numbers, never code or an architecture of its own.
-#   proportional steering (PROP_STEER levels, full left to full right) + pedal (PROP_PEDAL levels: full
-#               brake, half brake, coast, half throttle, full throttle) + boost (off, on; N2 / N1): the car eases to them
-LAYOUTS = ("combined", "two_head", "three_head", "proportional")
-PROP_STEER, PROP_PEDAL, PROP_BASE = 7, 5, 1000   # a proportional action: PROP_BASE + steer + 7 x pedal + 35 x boost
+LAYOUTS = ("combined", "two_head", "three_head", "combined_prop", "two_head_prop", "three_head_prop")
+PROP_STEER, PROP_PEDAL, PROP_BASE = 7, 5, 1000   # an action by degrees: PROP_BASE + steer + 7 x pedal + 35 x boost
 
 
 def controls(action: int) -> tuple:
     """A car's action as (steering target -1..1, pedal as today: 0 gas, 1 coast, 2 brake, 3 boost, throttle 0..1,
-    brake 0..1). Today's actions are all or nothing; a proportional one (PROP_BASE and up) has levels."""
+    brake 0..1). On/off actions are all or nothing; one by degrees (PROP_BASE and up) has levels."""
     if action >= PROP_BASE:
         a = action - PROP_BASE
         s, p, b = a % PROP_STEER, (a // PROP_STEER) % PROP_PEDAL, a // (PROP_STEER * PROP_PEDAL)
@@ -761,18 +765,35 @@ def controls(action: int) -> tuple:
     return action % 3 - 1, pedal, 1.0 if pedal in (0, 3) else 0.0, 1.0 if pedal == 2 else 0.0
 
 
+def layout_heads(pedals: int, layout: str) -> list | None:
+    """A layout's heads (each one's choice count, in output order) for a class with this many on/off pedals (4: with
+    boost, 3, 0: steering only); None: the layout isn't allowed for it."""
+    prop = layout.endswith("_prop")
+    build = layout[:-5] if prop else layout
+    if build not in ("combined", "two_head", "three_head") or (layout not in LAYOUTS):
+        return None
+    if not pedals:
+        return [3] if layout == "combined" else None
+    s, p = (PROP_STEER, PROP_PEDAL + (pedals == 4)) if prop else (3, pedals)   # (p: pedal choices, boost the last)
+    return [s * p] if build == "combined" else [s, p] if build == "two_head" else [s, p - 1, 2] if pedals == 4 else None
+
+
+def layout_move(layout: str, picks: list) -> int:
+    """The car's action from each head's choice (a combined brain: its one choice, steering fastest)."""
+    if layout.endswith("_prop"):
+        if len(picks) == 3:
+            return PROP_BASE + picks[0] + PROP_STEER * picks[1] + PROP_STEER * PROP_PEDAL * picks[2]
+        s, q = (picks[0] % PROP_STEER, picks[0] // PROP_STEER) if len(picks) == 1 else picks
+        return PROP_BASE + s + PROP_STEER * min(q, PROP_PEDAL - 1) + PROP_STEER * PROP_PEDAL * (q == PROP_PEDAL)
+    if len(picks) == 3:
+        return heads_action(*picks)
+    return picks[0] if len(picks) == 1 else picks[1] * 3 + picks[0]
+
+
 def layout_outputs(gen: int, layout: str) -> int | None:
     """How many outputs a brain of this kind has with this layout (None: the layout isn't allowed for it)."""
-    pedals = 4 if is_f1(gen) else 3 if has_pedals(gen) else 0
-    if layout == "combined":
-        return 3 * pedals if pedals else 3
-    if layout == "two_head":
-        return 3 + pedals if pedals else None
-    if layout == "three_head":
-        return 8 if pedals == 4 else None
-    if layout == "proportional":
-        return PROP_STEER + PROP_PEDAL + (2 if pedals == 4 else 0) if pedals else None
-    return None
+    heads = layout_heads(4 if is_f1(gen) else 3 if has_pedals(gen) else 0, layout)
+    return sum(heads) if heads else None
 
 
 def heads_action(steer: int, pedal: int, boost: int) -> int:
@@ -864,6 +885,7 @@ class Brain:
         gen = KIND_OF_INPUTS.get(n_in, 0)   # (the kind from the inputs: each count belongs to one kind)
         self.gen = gen if gen and layout_outputs(gen, self.layout) == n_out else 0
         self.tier = tier_of_gen(self.gen)
+        self.heads = layout_heads(4 if is_f1(self.gen) else 3 if has_pedals(self.gen) else 0, self.layout) if self.gen else None
         if (not self.gen or self.b1.shape != (h,) or self.w2.shape != (n_out, h) or self.b2.shape != (n_out,)
                 or not 1 <= h <= 512):
             raise ValueError("not a NeuroPrix brain")
@@ -881,15 +903,11 @@ class Brain:
         x = np.clip(np.asarray(obs, dtype=np.float64), 0, 1)
         h = np.maximum(self.w1 @ x + self.b1, 0)
         logits = self.w2 @ h + self.b2
-        if self.layout == "two_head":   # each head on its own (the same temperature for each)
-            return self._pick(logits[3:]) * 3 + self._pick(logits[0:3])
-        if self.layout == "three_head":
-            return heads_action(self._pick(logits[0:3]), self._pick(logits[3:6]), self._pick(logits[6:8]))
-        if self.layout == "proportional":
-            n = PROP_STEER + PROP_PEDAL
-            b = self._pick(logits[n:n + 2]) if len(logits) > n else 0
-            return PROP_BASE + self._pick(logits[0:PROP_STEER]) + PROP_STEER * self._pick(logits[PROP_STEER:n]) + PROP_STEER * PROP_PEDAL * b
-        return self._pick(logits)
+        cuts = np.cumsum([0] + self.heads)
+        picks = [0] * len(self.heads)
+        for i in ((1, 0) if len(self.heads) == 2 else range(len(self.heads))):   # each head on its own (the same
+            picks[i] = self._pick(logits[cuts[i]:cuts[i + 1]])                   # temperature; two heads: pedal first)
+        return layout_move(self.layout, picks)
 
     def _pick(self, logits) -> int:
         if self.temperature <= 0:

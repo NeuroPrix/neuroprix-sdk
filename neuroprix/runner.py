@@ -108,7 +108,7 @@ def session_settings(flags: list) -> dict:
                 raise ValueError("unknown class")
             out["class"] = c
         elif name == "layout":   # the brain's action layout: one of the fixed few (the SDK's docs/brain-format.md)
-            if v not in ("combined", "two_head", "three_head", "proportional"):
+            if v not in ("combined", "two_head", "three_head", "combined_prop", "two_head_prop", "three_head_prop"):
                 raise ValueError("unknown action layout")
             out["layout"] = v
         elif name == "seeds":

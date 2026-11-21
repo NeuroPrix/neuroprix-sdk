@@ -41,7 +41,7 @@ from torch.distributions import Categorical
 
 from neuroprix.browser_env import RaceEnv, load_track_spec
 from neuroprix.env import SimEnv, sim   # (sim: the race engine)
-from neuroprix.brain import PROP_BASE, PROP_PEDAL, PROP_STEER, DEFAULT_LAYOUT, OLD_INPUTS, OLD_SENSES, GEN_OF_SHAPE, LAYOUTS, N_HIDDEN, PEDALS, SENSES, TIER_OF_GEN, TIERS, RaceBrain, gen_of, generation, heads_action, layout_outputs, load_layout, load_weights, pick_action, relayout, save_brain, state_to_obs  # noqa: E402
+from neuroprix.brain import PROP_BASE, PROP_PEDAL, PROP_STEER, DEFAULT_LAYOUT, OLD_INPUTS, OLD_SENSES, GEN_OF_SHAPE, LAYOUTS, N_HIDDEN, PEDALS, SENSES, TIER_OF_GEN, TIERS, RaceBrain, gen_of, generation, layout_heads, layout_move, layout_outputs, load_layout, load_weights, pick_action, relayout, save_brain, state_to_obs  # noqa: E402
 
 # Rewards (per step of 4 frames). Further along the track is a better episode.
 # A step with no new best distance pays R_IDLE. A step that advances pays for every
@@ -137,7 +137,9 @@ class TrainPolicy(nn.Module):
         heads' distribution, at any temperature);
       "combined": one head over every pedal x steering pair, exported as it is;
       "two_head": steering and pedal heads, exported as they are (3 + pedals outputs);
-      "three_head": steering, pedal (gas / coast / brake) and boost (off / on) heads (N2 / N1), exported as they are.
+      "three_head": steering, pedal (gas / coast / brake) and boost (off / on) heads (N2 / N1), exported as they are;
+      "combined_prop", "two_head_prop", "three_head_prop": the same builds by degrees (7 steering levels, 5 pedal
+        levels, boost: agent/model.py layout_heads), exported as they are.
     A training action is the heads' choices in mixed radix (steer + 3 x pedal [+ 9 x boost]); env_action turns it into
     the car's action."""
 
@@ -151,9 +153,7 @@ class TrainPolicy(nn.Module):
         if n_out is None:
             raise ValueError(f"the {self.layout} action layout isn't available in {tier.upper()}")
         self.shape, self.gen = (n_in, n_out), gen_of(n_in, n_out, self.layout)
-        self.sizes = ([3, self.pedals] if layout is None and self.pedals else [n_out] if layout in (None, "combined")
-                      else [3, self.pedals] if layout == "two_head"
-                      else [PROP_STEER, PROP_PEDAL] + ([2] if self.pedals == 4 else []) if layout == "proportional" else [3, 3, 2])
+        self.sizes = [3, self.pedals] if layout is None and self.pedals else layout_heads(tier, self.layout)
         self.summed = layout is None and len(self.sizes) == 2   # (two heads exported as one combined layer)
         self.split = len(self.sizes) > 1   # (several heads)
         self.fc1 = nn.Linear(n_in, N_HIDDEN)
@@ -187,10 +187,8 @@ class TrainPolicy(nn.Module):
         return a, sum(h.log_prob(p) for h, p in zip(d, picks))
 
     def env_action(self, a: int) -> int:
-        """The car's action for a training action (they're the same unless there are three heads)."""
-        if self.layout == "proportional":   # (the heads' choices in mixed radix are exactly the car's proportional action)
-            return PROP_BASE + int(a)
-        return heads_action(a % 3, (a // 3) % 3, a // 9) if self.layout == "three_head" else int(a)
+        """The car's action for a training action (each head's choice, as the exported brain would map it)."""
+        return layout_move(self.layout, [int(p) for p in self._parts(int(a))])
 
     def log_prob_entropy(self, x, a):
         d = self.dists(x)
@@ -718,9 +716,9 @@ def main() -> None:
     ap.add_argument("--league-cars", type=int, default=0, help="cars per episode driven by league brains (not learned from)")
     ap.add_argument("--layout", choices=LAYOUTS, default=None,
                     help="the brain's action layout (docs/brain-format.md): combined (one choice over every pedal x "
-                         "steering pair), two_head (steering, pedal) or three_head (steering, pedal, boost; N2 / N1). "
-                         "Default: a resumed brain's own; a new N1 brain three_head; else two heads trained and saved as "
-                         "combined (as always)")
+                         "steering pair), two_head (steering, pedal) or three_head (steering, pedal, boost; N2 / N1), each "
+                         "on/off or by degrees (_prop). Default: a resumed brain's own; a new brain by degrees "
+                         "(N2 / N1 three_head_prop, N3 two_head_prop)")
     ap.add_argument("--contact-blame", action="store_true", help="a touch costs the car that caused it 1.5x, the car hit 0.5x")
     ap.add_argument("--updates", type=int, default=150, help="policy updates")
     ap.add_argument("--batch", type=int, default=8, help="episodes (fields of cars) per update")
@@ -871,7 +869,7 @@ def main() -> None:
             pass   # (reported below)
         if args.layout is None and src_layout != "combined":
             args.layout = src_layout
-    elif args.layout is None:   # a new brain: its class's default layout (N1: three_head)
+    elif args.layout is None:   # a new brain: its class's default layout (agent/model.py DEFAULT_LAYOUT)
         args.layout = DEFAULT_LAYOUT.get(tier)
     try:
         policy = TrainPolicy(tier, args.senses, args.layout)
@@ -897,14 +895,20 @@ def main() -> None:
         policy.load_brain(sd)
         if policy.split and args.reopen_pedals < 1:   # a driver that stopped trying the brake (or boost) never learns it
             with torch.no_grad():                       # pays: flatten its pedal choice so every pedal gets tried again
-                policy.head.weight[3:] *= args.reopen_pedals
-                policy.head.bias[3:] *= args.reopen_pedals
+                policy.head.weight[policy.sizes[0]:] *= args.reopen_pedals
+                policy.head.bias[policy.sizes[0]:] *= args.reopen_pedals
     else:
         with torch.no_grad():   # gentle start; an N3 newborn leans a little on the throttle (pedal head: 0 = accelerate)
             policy.head.weight.mul_(0.1)
             policy.head.bias.zero_()
-            if policy.layout == "proportional":   # (a lean on full throttle; boost at even odds)
-                policy.head.bias[PROP_STEER + PROP_PEDAL - 1] += 0.5
+            if policy.layout.endswith("_prop"):   # by degrees: a lean on full throttle (and boost, as likely)
+                full = PROP_PEDAL - 1
+                if policy.split:
+                    policy.head.bias[PROP_STEER + full] += 0.5
+                    if policy.pedals == 4 and len(policy.sizes) == 2:   # (two heads: boost is the pedal's last level)
+                        policy.head.bias[PROP_STEER + full + 1] += 0.5
+                else:   # (one joint head: on every full throttle and boost pair)
+                    policy.head.bias[PROP_STEER * full:] += 0.5
             elif policy.split:
                 policy.head.bias[3] += 0.5
                 if policy.pedals == 4 and policy.layout != "three_head":   # N2: Boost starts as likely as the throttle

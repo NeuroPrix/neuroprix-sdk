@@ -90,8 +90,8 @@ A wrecked car reads as a car standing still. Obstacles aren't on the radar (ston
   and boost 0 / 1 (N2, N1; only with throttle). The car eases its wheel to the steering level as with any action.
 
 That's the action the engine takes (`env.step_world`). A brain's outputs can be laid out four ways, one score per
-action (`combined`) or one group per control (`two_head`, `three_head`, `proportional`): see
-[action layouts](brain-format.md#action-layouts). New N3, N2 and N1 brains are `proportional`.
+action (`combined`) or one group per control (`two_head`, `three_head`), each on/off or by degrees (`_prop`): see
+[action layouts](brain-format.md#action-layouts). New N3, N2 and N1 brains drive by degrees.
 
 ## The rules of the road, briefly
 

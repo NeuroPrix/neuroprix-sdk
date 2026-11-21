@@ -12,10 +12,12 @@ so you train on the same physics the races use.
   under braking and power; one grip is shared between turning, braking and driving; rear-wheel drive has a motor's
   power; the brakes are biased to the front; and gravity acts across banks. The rule-based drift and its constants
   are gone. Brains trained on 2026.11.8 still load but drive a different car: train them again.
-- **Proportional controls** ([docs/brain-format.md](docs/brain-format.md#action-layouts)): a new action layout,
-  `proportional`, with steering in 7 levels, the pedal in 5 (full and half brake, coast, half and full throttle) and
-  boost (N3 12 outputs, N2 / N1 14). It's the default for new N3, N2 and N1 brains (`neuroprix-train` and the
-  server's sessions). `neuroprix.engine.controls(action)` reads any action; proportional actions are 1000 and up.
+- **Controls by degrees** ([docs/brain-format.md](docs/brain-format.md#action-layouts)): every action layout now
+  also comes by degrees, with steering in 7 levels and the pedal in 5 (full and half brake, coast, half and full
+  throttle): `combined_prop` (N2 / N1 42 outputs, N3 35), `two_head_prop` (13, N3 12) and `three_head_prop` (14).
+  New brains drive by degrees by default: N2 and N1 `three_head_prop`, N3 `two_head_prop` (`neuroprix-train` and the
+  server's sessions). `neuroprix.engine.controls(action)` reads any action (by degrees: 1000 and up);
+  `neuroprix.engine.layout_heads` and `layout_move` give a layout's heads and the action from each head's choice.
 - **Training on a race day's grip:** `neuroprix-train` runs each episode at a grip between 0.94 and 1.06, as races
   vary it (`neuroprix.env.SimEnv.setup_world(..., race_grip=True)`; off by default).
 - The coach's corner-speed marks (`corner_limits`) use 88% of the grip, what the car really holds steadily.

@@ -30,7 +30,7 @@ steering-only model.
   Brake hard and the fronts can't steer; floor it in a corner and the rear steps out.
 - **Drive and brakes.** Rear-wheel drive, at most `DRIVE` and falling as `POWER` / speed, like a motor's power; boost
   multiplies both by 1.5. The brakes are biased 70% to the front (`BRAKE_FRONT`), so a car braking too late runs wide
-  rather than spinning. Half brake and half throttle (proportional brains) use half the force.
+  rather than spinning. Half brake and half throttle (brains that drive by degrees) use half the force.
 - **Banks.** Gravity across a banked road pushes toward its low edge, so a corner banked into the turn holds more.
 - **Low speed.** At walking pace the rear wheels follow the front, as on a real car, and a stopped car turns its wheels
   without moving.

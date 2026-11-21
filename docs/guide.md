@@ -125,8 +125,9 @@ Every driver belongs to a **class**. The class decides what the driver can sense
 
 The outputs above are one score per move (the `combined` action layout). A brain can instead pick its steering, its
 pedal and (N2, N1) its boost separately: `two_head` (N3 6, N2 / N1 7 outputs), `three_head` (N2 / N1, 8) or
-`proportional` (steering and pedals by degrees: N3 12, N2 / N1 14). **New N3, N2 and N1 brains are `proportional`**;
-a driver that keeps training keeps its layout unless you move it on the Train page. See
+each of the three also by degrees (`combined_prop`, `two_head_prop`, `three_head_prop`: steering in 7 levels, the
+pedal in 5). **New N3, N2 and N1 brains drive by degrees** (N2 / N1 `three_head_prop`, N3 `two_head_prop`); a driver
+that keeps training keeps its layout unless you move it on the Train page. See
 [action layouts](brain-format.md#action-layouts).
 
 Every class's radar sees all round the car, behind too, in 8 sectors
@@ -365,7 +366,7 @@ This writes the best brain to `experiment.json` (and `experiment.pth`, the same 
 | `--traffic N` | Cars per practice run, all driven by this driver (1 = alone) | 4 |
 | `--eval-every N` | Check every N updates | 10 |
 | `--resume brain.json` | Start from an existing brain of the same class (a `.json`, or a `.pth` with PyTorch 2.6 or newer) | a new brain |
-| `--layout combined\|two_head\|three_head\|proportional` | The brain's [action layout](brain-format.md#action-layouts). A resumed brain can move forward (combined → two_head → three_head) and keeps what it learned | a resumed brain's own; a new N3, N2 or N1 brain `proportional`; N4 `combined` |
+| `--layout combined\|two_head\|three_head` (each also `_prop`: by degrees) | The brain's [action layout](brain-format.md#action-layouts). A resumed brain can move forward (combined → two_head → three_head, keeping on/off or by degrees) and keeps what it learned | a resumed brain's own; a new N2 or N1 brain `three_head_prop`, N3 `two_head_prop`; N4 `combined` |
 | `--workers N` | Games in parallel | cores minus 2 (at most 8) |
 | `--progress-json` | Print progress as JSON lines (as the runner sees it) | text |
 | reward weights | `--progress`, `--fast`, `--damage`, `--crash`, `--corner`, `--overtake`, `--lose-place`, `--wall`, … | NeuroPrix's defaults |

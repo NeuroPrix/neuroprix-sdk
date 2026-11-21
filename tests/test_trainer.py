@@ -72,17 +72,18 @@ def test_custom_rewards_example(tmp_path):
     check_brain(tmp_path / "brain.json", "n3")
 
 
-@pytest.mark.parametrize("layout", ["combined", "two_head", "three_head", "proportional", None])
+@pytest.mark.parametrize("layout", ["combined", "two_head", "three_head", "combined_prop", "two_head_prop", "three_head_prop", None])
 def test_action_layouts(layout, tmp_path):
-    """A session's layout setting (docs/brain-format.md#action-layouts); without one, a new N1 brain is proportional."""
+    """A session's layout setting (docs/brain-format.md#action-layouts); without one, a new N1 brain is three_head_prop."""
     settings = {"updates": 2, "batch": 2, "eval_every": 2, "traffic": 1, "max_steps": 60, "seeds": [101]}
     if layout:
         settings["layout"] = layout
     session = write_session(tmp_path, "n1", settings=settings)
     train([sys.executable, "-m", "neuroprix.train"], session)
     data = check_brain(tmp_path / "brain.json", "n1")
-    assert engine.Brain(data).layout == (layout or "proportional")
-    assert len(data["fc2"]["weight"]) == {"combined": 12, "two_head": 7, "three_head": 8, "proportional": 14}[layout or "proportional"]
+    assert engine.Brain(data).layout == (layout or "three_head_prop")
+    assert len(data["fc2"]["weight"]) == {"combined": 12, "two_head": 7, "three_head": 8, "combined_prop": 42, "two_head_prop": 13,
+                                          "three_head_prop": 14}[layout or "three_head_prop"]
 
 
 def test_minimal_trainer_three_heads(tmp_path):
@@ -91,25 +92,26 @@ def test_minimal_trainer_three_heads(tmp_path):
     assert engine.Brain(check_brain(tmp_path / "brain.json", "n1")).layout == "three_head"
 
 
-def test_minimal_trainer_proportional(tmp_path):
-    session = write_session(tmp_path, "n1", settings={"updates": 2, "seeds": [101], "layout": "proportional"})
+@pytest.mark.parametrize("cls,layout", [("n1", "three_head_prop"), ("n1", "two_head_prop"), ("n1", "combined_prop"), ("n3", "two_head_prop")])
+def test_minimal_trainer_by_degrees(cls, layout, tmp_path):
+    session = write_session(tmp_path, cls, settings={"updates": 2, "seeds": [101], "layout": layout})
     train([sys.executable, str(ROOT / "examples" / "minimal_trainer.py")], session)
-    assert engine.Brain(check_brain(tmp_path / "brain.json", "n1")).layout == "proportional"
+    assert engine.Brain(check_brain(tmp_path / "brain.json", cls)).layout == layout
 
 
 def test_layout_shims():
     import torch
 
     from neuroprix import brain
-    assert brain.LAYOUTS == ("combined", "two_head", "three_head", "proportional")
-    assert brain.DEFAULT_LAYOUT == {"n1": "proportional", "n2": "proportional", "n3": "proportional"}
-    assert [brain.layout_outputs("n1", l) for l in brain.LAYOUTS] == [12, 7, 8, 14]
-    assert brain.layout_outputs("n3", "proportional") == 12 and brain.layout_outputs("n4", "proportional") is None
+    assert brain.LAYOUTS == ("combined", "two_head", "three_head", "combined_prop", "two_head_prop", "three_head_prop")
+    assert brain.DEFAULT_LAYOUT == {"n1": "three_head_prop", "n2": "three_head_prop", "n3": "two_head_prop"}
+    assert [brain.layout_outputs("n1", l) for l in brain.LAYOUTS] == [12, 7, 8, 42, 13, 14]
+    assert brain.layout_outputs("n3", "two_head_prop") == 12 and brain.layout_outputs("n4", "two_head_prop") is None
     assert brain.layout_outputs("n3", "three_head") is None and brain.layout_outputs("n4", "two_head") is None
     scores = torch.tensor([0.0, 2.0, 0.0, 3.0, 0.0, 0.0, 0.0, 1.0])   # straight, gas, boost on
     assert brain.pick_action(scores, "three_head", greedy=True) == engine.heads_action(1, 0, 1) == 10
     p = torch.zeros(14); p[5] = 2.0; p[7 + 3] = 1.0; p[13] = 1.0   # two thirds right, half gas, boost on
-    a = brain.pick_action(p, "proportional", greedy=True)
+    a = brain.pick_action(p, "three_head_prop", greedy=True)
     assert a == 1000 + 5 + 7 * 3 + 35 and engine.controls(a) == (2 / 3, 3, 0.5, 0.0)
 
 
