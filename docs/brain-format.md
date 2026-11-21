@@ -58,18 +58,22 @@ outputs become those controls. Leave it out and it's `combined`.
 | `combined` | one per steering x pedal pair: N4 3, N3 9, N2 / N1 12 | the best of all of them: action = pedal x 3 + steering, pedal 3 = gas with boost | all |
 | `two_head` | 3 steering, then the pedals: N3 3 + 3 = 6, N2 / N1 3 + 4 = 7 (boost as a 4th pedal) | the best steering and, separately, the best pedal | N3, N2, N1 |
 | `three_head` | 3 steering, 3 pedal (gas, coast, brake), 2 boost (off, on) = 8 | the best of each of the three on its own | N2, N1 |
+| `proportional` | 7 steering (full, two thirds, a third left; straight; a third, two thirds, full right), 5 pedal (full brake, half brake, coast, half gas, full gas), N2 / N1 2 boost (off, on): N3 12, N2 / N1 14 | the best of each on its own: action = 1000 + steering + 7 x pedal + 35 x boost | N3, N2, N1 |
 
 ```json
-{"name": "Nora Summit", "arch": "mlp-57-64-8", "generation": 19, "action_layout": "three_head", "fc1": {...}, "fc2": {...}}
+{"name": "Nora Summit", "arch": "mlp-57-64-14", "generation": 19, "action_layout": "proportional", "fc1": {...}, "fc2": {...}}
 ```
 
-- **New N1 brains are `three_head`** by default (it drove cleanest in traffic in NeuroPrix's tests). The server says
+- **New N3, N2 and N1 brains are `proportional`** by default (engine 2026.11.9): the cars handle like real ones (see
+  [the engine](engine.md#how-the-car-handles)), and a brain that steers part-way and brakes or accelerates by half
+  catches slides that all-or-nothing controls turn into spins. Before, new N1 brains were `three_head`. The server says
   which layout a session wants (`settings.layout`, [the trainer contract](trainer-contract.md)); your brain must have
   the layout it declares, and the output count must fit it and the class, or the server refuses it.
-- Only these three fixed layouts exist. The server never builds any other network: there's no field for layers,
+- Only these four fixed layouts exist. The server never builds any other network: there's no field for layers,
   sizes or code.
 - In Python, `neuroprix.brain` has the shims: `LAYOUTS`, `DEFAULT_LAYOUT`, `layout_outputs(tier, layout)`,
   `pick_action(scores, layout, greedy)` (scores to the car's action), `relayout(state_dict, src, dst, pedals)` (move a
-  brain forward: combined -> two_head -> three_head, keeping what it learned) and `load_layout(path)`. The engine's
-  `neuroprix.engine.heads_action(steer, pedal, boost)` turns three choices into the action number, and
+  brain forward: combined -> two_head -> three_head, keeping what it learned; nothing moves to proportional) and
+  `load_layout(path)`. The engine's `neuroprix.engine.heads_action(steer, pedal, boost)` turns three choices into the
+  action number, `neuroprix.engine.controls(action)` any action into a steering target and throttle and brake levels, and
   `neuroprix.engine.Brain` reads any layout. `neuroprix-train --layout ...` trains any of them.

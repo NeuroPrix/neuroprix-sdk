@@ -5,7 +5,7 @@ The car decides 15 times a second: each decision lasts 4 physics frames (60 fram
 ## Inputs, in order
 
 Every brain senses only what a real car or its driver could measure, plus which way the race goes (brain kinds 16–19:
-N4 46 inputs, N3 47, N2 49, N1 57; engine 2026.11.8). Nothing is read off the track map but the heading.
+N4 46 inputs, N3 47, N2 49, N1 57; engine 2026.11.9). Nothing is read off the track map but the heading.
 
 | # | Input | Classes | Meaning |
 |---|---|---|---|
@@ -85,10 +85,13 @@ A wrecked car reads as a car standing still. Obstacles aren't on the radar (ston
 - **N3** (9), **N2** and **N1** (12): action = pedal × 3 + steering, with steering 0 = left, 1 = straight, 2 = right, and
   pedal 0 = accelerate, 1 = coast (lift off), 2 = brake, and in N2 and N1 3 = boost (uses the battery; with nothing to
   give it's the throttle).
+- **Proportional** (N3, N2, N1): 1000 + steering + 7 × pedal + 35 × boost, with steering 0..6 from full left through
+  straight (3) to full right, pedal 0 = full brake, 1 = half brake, 2 = coast, 3 = half throttle, 4 = full throttle,
+  and boost 0 / 1 (N2, N1; only with throttle). The car eases its wheel to the steering level as with any action.
 
-That's the action the engine takes (`env.step_world`). A brain's outputs can be laid out three ways, one score per
-action (`combined`) or one group per control (`two_head`, `three_head`): see
-[action layouts](brain-format.md#action-layouts). New N1 brains are `three_head`.
+That's the action the engine takes (`env.step_world`). A brain's outputs can be laid out four ways, one score per
+action (`combined`) or one group per control (`two_head`, `three_head`, `proportional`): see
+[action layouts](brain-format.md#action-layouts). New N3, N2 and N1 brains are `proportional`.
 
 ## The rules of the road, briefly
 
@@ -101,6 +104,7 @@ they always have.
 
 Walls and stones cost health by how hard you hit them (a square-on hit at top speed wrecks the car); touching another
 car costs both half their speed. The first 20% of damage is the body only and costs no speed; below 80% health top
-speed falls evenly to half at zero, until a pit stop. Too fast for a corner and the car drifts wide. A wrecked car, one that makes no
+speed falls evenly to half at zero, until a pit stop. The N3, N2 and N1 cars handle like real ones
+([the engine](engine.md#how-the-car-handles)): too fast for a corner and the car washes wide or spins. A wrecked car, one that makes no
 progress for 10 seconds, or one going the wrong way is out. The full rules are the engine itself
 (`neuroprix.engine`): it's the same code the official races run.

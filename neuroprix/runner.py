@@ -41,7 +41,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-VERSION = "0.3.1"
+VERSION = "0.3.2"
 CONFIG = Path(os.environ.get("NEUROPRIX_RUNNER_CONFIG") or Path.home() / ".neuroprix" / "runner.json")
 SESSION_FORMAT = 1
 
@@ -108,7 +108,7 @@ def session_settings(flags: list) -> dict:
                 raise ValueError("unknown class")
             out["class"] = c
         elif name == "layout":   # the brain's action layout: one of the fixed few (the SDK's docs/brain-format.md)
-            if v not in ("combined", "two_head", "three_head"):
+            if v not in ("combined", "two_head", "three_head", "proportional"):
                 raise ValueError("unknown action layout")
             out["layout"] = v
         elif name == "seeds":

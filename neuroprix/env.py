@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 from neuroprix import engine as sim
+TRAIN_GRIP = (0.94, 1.06)   # each training episode on a race day's grip, as races are (backend/conditions.GRIP_RANGE)
 
 GEN_OF_TIER = {"n4": 16, "n3": 17, "n2": 18, "n1": 19}   # each class's brain kind for new brains: the senses a real car could measure
 KINDS = (16, 17, 18, 19)   # brain kinds a training car can have (docs/observations-and-actions.md)
@@ -42,6 +43,7 @@ class SimEnv:
         self.track = None
         self.world = None
         self.random_start = False
+        self.race_grip = False
         self.track_info: dict = {}
         self._specs: dict = {}   # recent circuits, built once (building one is the slowest part of a reset). A Grand
         # Prix circuit's track map is about 15 MB, so only a few are kept: gyms (few, reused) and the last 2 random ones
@@ -60,13 +62,15 @@ class SimEnv:
 
     def setup_world(self, spec: dict, cars: int = 1, random_start: bool = False, tier: str = "n3", speed_cap: float = 1.0,
                     fragile: bool = False, caps: list[float] | None = None, gen: int | None = None,
-                    gens: list[int] | None = None, rolling: float = 0.0) -> dict:
+                    gens: list[int] | None = None, rolling: float = 0.0, race_grip: bool = False) -> dict:
         """gen: the brain kind of every car (default: the class's current one); gens: one kind per car instead (a field
         of mixed kinds: league opponents of an earlier generation). rolling: a rolling start, every car already moving
-        at this share of top speed (0 = standing)."""
+        at this share of top speed (0 = standing). race_grip: each episode (reset_world) on a race day's grip
+        (TRAIN_GRIP), as races vary it: the trainer's; checks and the browser bridge leave it off."""
         T = self.track = self._build(spec, "n1" if str(tier).lower() == "n1" else None)
         self.world = sim.World(T)
         self.random_start = bool(random_start)
+        self.race_grip = bool(race_grip)
         self.rolling = _clamp(float(rolling or 0), 0.0, 1.0)
         n = int(_clamp(int(cars or 1), 1, MAX_CARS))
         g = gen if gen in KINDS else GEN_OF_TIER.get(str(tier).lower() if str(tier).lower() == "n1" else sim.norm_class(tier, "n3"), 5)
@@ -116,6 +120,10 @@ class SimEnv:
             if self.rolling > 0:   # a rolling start: already moving, straight ahead
                 c.speed = self.rolling * sim.MAX_SPEED * c.cap_k
                 c.vx, c.vy, c.dir = math.cos(c.angle) * c.speed, math.sin(c.angle) * c.speed, c.angle
+        if self.race_grip:   # training: each episode on a race day's grip (TRAIN_GRIP), the whole field alike
+            g = round(random.uniform(*TRAIN_GRIP), 3)
+            for c in cars:
+                c.grip_k = g
         W.frame_no, W.touch = 0, {}
         for c in cars:
             c.sense(W)
@@ -129,7 +137,8 @@ class SimEnv:
             c.touched.clear()
             if not (c.dead or c.finished):
                 top = 11 if sim.is_f1(c.gen) else 8 if sim.has_pedals(c.gen) else 2
-                c.action = int(_clamp(int(actions[i]) if i < len(actions) else 0, 0, top))
+                a = int(actions[i]) if i < len(actions) else 0
+                c.action = a if a >= sim.PROP_BASE and sim.has_pedals(c.gen) else int(_clamp(a, 0, top))   # (proportional: sim.controls)
         # Sensors only after the last frame: that's when the trainer reads them. Except a car about to finish: one that
         # takes the flag mid-step keeps the readings from the frame before (as in the browser), so it reads every frame.
         goal = self.track.laps * self.track.L - 30

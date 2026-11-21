@@ -22,7 +22,8 @@ HIDDEN = 64
 def outputs(cls, layout):
     """How many scores a brain of this class has in this action layout (docs/brain-format.md#action-layouts)."""
     p = PEDALS[cls]
-    return {"combined": 3 * p or 3, "two_head": 3 + p if p else None, "three_head": 8 if p == 4 else None}[layout]
+    return {"combined": 3 * p or 3, "two_head": 3 + p if p else None, "three_head": 8 if p == 4 else None,
+            "proportional": 7 + 5 + (2 if p == 4 else 0) if p else None}[layout]
 
 
 def act(scores, layout):
@@ -32,6 +33,10 @@ def act(scores, layout):
     if layout == "three_head":   # 3 steering, 3 pedal (gas, coast, brake), 2 boost (off, on); boost only with gas
         steer, pedal, boost = int(np.argmax(scores[:3])), int(np.argmax(scores[3:6])), int(np.argmax(scores[6:8]))
         return (3 if pedal == 0 and boost == 1 else pedal) * 3 + steer
+    if layout == "proportional":   # 7 steering levels, 5 pedal levels (full brake .. full gas), boost: by degrees
+        steer, pedal = int(np.argmax(scores[:7])), int(np.argmax(scores[7:12]))
+        boost = int(np.argmax(scores[12:14])) if len(scores) > 12 else 0
+        return 1000 + steer + 7 * pedal + 35 * boost
     return int(np.argmax(scores))
 
 

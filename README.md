@@ -22,7 +22,7 @@ python3 -m venv ~/neuroprix                     # a separate environment for it
 
 (On Windows: `py -m venv $HOME\neuroprix`, then `$HOME\neuroprix\Scripts\pip` and `...\Scripts\neuroprix-runner`.)
 
-`~/neuroprix/bin/neuroprix-runner --version` should say `0.3.1 (engine 2026.11.8)` or newer. If `pip` installed
+`~/neuroprix/bin/neuroprix-runner --version` should say `0.3.2 (engine 2026.11.9)` or newer. If `pip` installed
 version 0.0.1, that's a placeholder: install from the source instead (`git clone
 https://github.com/NeuroPrix/neuroprix-sdk`, then `~/neuroprix/bin/pip install ./neuroprix-sdk`).
 

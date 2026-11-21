@@ -24,7 +24,7 @@ import numpy as np
 # The engine's version: bump it whenever the physics, the circuits or what drivers sense changes (the same number is in
 # game/index.html as ENGINE_VERSION). Runners report theirs, and the Train page flags a runner whose engine is out of date
 # (it would be training on different physics than the races use).
-ENGINE_VERSION = "2026.11.8"   # (2026.11.8: the first 20% of damage costs no speed; the radar's three front sectors see 600 px)
+ENGINE_VERSION = "2026.11.9"   # (2026.11.9: N3, N2 and N1 cars handle like real ones; proportional controls)
 
 W, H = 900, 600                # default world (training gyms); Grand Prix circuits carry their own "size"
 MAX_SPEED, ACCEL, TURN_DRAG, TURN_RATE, MIN_SPEED = 5.0, 0.12, 0.975, 0.055, 1.2
@@ -44,12 +44,20 @@ PITCH_FULL, ROLL_FULL = 0.15, 0.3         # N1: the car's tilt (rad) along and a
 SIGHT_LOOK, SIGHT_FULL, SIGHT_STEP = (30, 90, 180), (0.05, 0.10, 0.15), 6   # N1 sight lines: px ahead, full scale (rad), samples
 BANK_FADE = 0.05   # banking only where the road curves: none below |K| = BANK_FADE / 2, all of it from BANK_FADE
 # generation 2: steering x pedal, contacts, radar (see PHYS in game/index.html)
-BRAKE, COAST_DRAG, SCRUB, TURN_FULL_SPEED, STEER_RATE = 0.12, 0.999, 0.985, 1.2, 0.15   # gentle brake; lifting barely slows
-LAT_GRIP = 0.12                    # N3/N2: most sideways acceleration the tyres hold; caps the turn rate at speed
-TYRE_DRAG = 0.02                   # cornering costs speed (x grip-in-use squared)
-YAW_K, DRIFT_SCRUB, SLIDE_GRIP = 1.6, 0.015, 0.7   # drift: the body turns up to YAW_K x the grip, the path bends at most the
-                                                 # grip (SLIDE_GRIP of it once sliding 0.4 rad); sliding costs DRIFT_SCRUB x |sin(slip)|
+BRAKE, COAST_DRAG, STEER_RATE = 0.12, 0.999, 0.15   # full brake (shared by the axles: BRAKE_FRONT); lifting barely slows
+LAT_GRIP = 0.12                    # N3/N2/N1: the tyres' grip (px/frame² sideways at full load; each axle its share)
 WHEELBASE, MAX_STEER = 12.0, 0.6   # N3 bicycle: rear axle to front axle, front-wheel angle at full lock
+# Since 2026.11.9, N3, N2 and N1 cars handle like real ones (the N4 still steers by TURN_RATE, below):
+# A bicycle model with tyre forces (docs/engine.md): the centre of mass CG_FRONT x WHEELBASE behind the front
+# axle, yaw inertia (radius of gyration squared YAW_R2), each axle's sideways force from its slip angle on a tyre curve
+# (peak at TYRE_PEAK rad, sin(TYRE_C pi / 2) of it fully sliding), each axle's grip LAT_GRIP x grip x its load, the load moving
+# forward under braking and back under power (CG_H), one grip shared between turning, braking and driving (a circle per
+# axle), rear-wheel drive (DRIVE, and POWER / speed: a motor's power; BOOST_ACCEL x it boosting), brakes split BRAKE_FRONT front, and gravity across a bank.
+# Integrated DYN_SUB times a frame. Nothing is scripted: understeer, oversteer, slides and spins come out of it.
+CG_FRONT, CG_H, YAW_R2 = 0.55, 1.6, 0.55 * 0.45 * 144.0   # a = 6.6 px, b = 5.4 px; height 1.6 px (a 1:10 car's 0.13 L); k² = a b
+TYRE_PEAK, TYRE_C, TYRE_MU = 0.14, 1.3, 1.0   # (TYRE_C 1.3: fully sliding keeps sin(1.3 pi / 2) = 89% of the peak, as racing slicks)
+DYN_CORNER = 0.88   # the coach's corner speeds (corner_limits): this share of LAT_GRIP, what the car really holds steadily
+DRIVE, POWER, BRAKE_FRONT, DYN_SUB = 0.05, 0.15, 0.7, 4   # drive force at most DRIVE, and POWER / speed (a motor's power)
 CAR_R, RADAR_RANGE, RADAR_FRONT = 5, 200, 600   # the radar sees 600 px (about 2 s at top speed) in its front, front-left
 # and front-right sectors, so a driver can see a car a second or two up the road; 200 px to the sides and behind
 HEALTH_FREE = 0.8   # damage down to this health is body damage only and costs no speed; below it top speed falls evenly to half at 0
@@ -734,7 +742,23 @@ OLD_SENSES = "this brain was made for senses NeuroPrix no longer uses: train a n
 #   two_head    steering (3) + pedal (pedals: N2 / N1 gas, coast, brake, boost; N3 gas, coast, brake), each chosen alone
 #   three_head  steering (3) + pedal (gas, coast, brake) + boost (off, on): 8 outputs; classes with a battery only
 # Only these fixed shapes are ever loaded: a brain is plain numbers, never code or an architecture of its own.
-LAYOUTS = ("combined", "two_head", "three_head")
+#   proportional steering (PROP_STEER levels, full left to full right) + pedal (PROP_PEDAL levels: full
+#               brake, half brake, coast, half throttle, full throttle) + boost (off, on; N2 / N1): the car eases to them
+LAYOUTS = ("combined", "two_head", "three_head", "proportional")
+PROP_STEER, PROP_PEDAL, PROP_BASE = 7, 5, 1000   # a proportional action: PROP_BASE + steer + 7 x pedal + 35 x boost
+
+
+def controls(action: int) -> tuple:
+    """A car's action as (steering target -1..1, pedal as today: 0 gas, 1 coast, 2 brake, 3 boost, throttle 0..1,
+    brake 0..1). Today's actions are all or nothing; a proportional one (PROP_BASE and up) has levels."""
+    if action >= PROP_BASE:
+        a = action - PROP_BASE
+        s, p, b = a % PROP_STEER, (a // PROP_STEER) % PROP_PEDAL, a // (PROP_STEER * PROP_PEDAL)
+        h, m = (PROP_STEER - 1) // 2, (PROP_PEDAL - 1) // 2
+        thr, brk = max(0.0, (p - m) / m), max(0.0, (m - p) / m)
+        return (s - h) / h, (3 if b and thr > 0 else 0 if thr > 0 else 2 if brk > 0 else 1), thr, brk
+    pedal = action // 3
+    return action % 3 - 1, pedal, 1.0 if pedal in (0, 3) else 0.0, 1.0 if pedal == 2 else 0.0
 
 
 def layout_outputs(gen: int, layout: str) -> int | None:
@@ -746,6 +770,8 @@ def layout_outputs(gen: int, layout: str) -> int | None:
         return 3 + pedals if pedals else None
     if layout == "three_head":
         return 8 if pedals == 4 else None
+    if layout == "proportional":
+        return PROP_STEER + PROP_PEDAL + (2 if pedals == 4 else 0) if pedals else None
     return None
 
 
@@ -807,7 +833,7 @@ def corner_limits(track) -> list:
         abx, aby, bcx, bcy, acx, acy = b[0] - a[0], b[1] - a[1], c[0] - b[0], c[1] - b[1], c[0] - a[0], c[1] - a[1]
         cr = abs(abx * bcy - aby * bcx)
         R = 1e9 if cr < 1e-9 else math.sqrt((abx * abx + aby * aby) * (bcx * bcx + bcy * bcy) * (acx * acx + acy * acy)) / (2 * cr)
-        lat = LAT_GRIP * (track.grip or 1)
+        lat = LAT_GRIP * (track.grip or 1) * DYN_CORNER
         if track.hilly:   # a banked corner holds more, an off-camber one less
             lat = max(0.2 * lat, lat + BANK_GRIP * math.sin(track.bank[i]))
         out.append(math.sqrt(lat * (R + track.width * 0.5)))
@@ -859,6 +885,10 @@ class Brain:
             return self._pick(logits[3:]) * 3 + self._pick(logits[0:3])
         if self.layout == "three_head":
             return heads_action(self._pick(logits[0:3]), self._pick(logits[3:6]), self._pick(logits[6:8]))
+        if self.layout == "proportional":
+            n = PROP_STEER + PROP_PEDAL
+            b = self._pick(logits[n:n + 2]) if len(logits) > n else 0
+            return PROP_BASE + self._pick(logits[0:PROP_STEER]) + PROP_STEER * self._pick(logits[PROP_STEER:n]) + PROP_STEER * PROP_PEDAL * b
         return self._pick(logits)
 
     def _pick(self, logits) -> int:
@@ -1009,6 +1039,8 @@ class Car:
         self.battery, self.boosting = 1.0, False
         self.braking = False   # on the brake this frame (for brake lights and sounds in broadcasts; not physics)
         self.grip_k, self.hold, self.load, self.yaw = 1.0, 0, 1.0, 0.0
+        self.yaw_r, self._ax = 0.0, 0.0   # yaw rate, rad a frame; the last push along the car (load shift)
+        self._thr, self._brk = 0.0, 0.0   # this frame's throttle and brake, 0..1 (controls)
         self.wrong_way_px = WRONG_WAY_PX
         self.seg = self.nearest_seg(self.x, self.y)
         s0 = self.project_s(self.x, self.y)
@@ -1189,57 +1221,26 @@ class Car:
         if self.speed > top:
             self.speed = max(top, self.speed - ACCEL) if is_f1(self.gen) else top
         if has_pedals(self.gen):
-            turn, pedal = self.action % 3 - 1, self.action // 3
+            turn, pedal, self._thr, self._brk = controls(int(self.action))
             if stunned:   # the wheel stays where it is, no throttle or brake
-                turn, pedal = self.steer, 1
+                turn, pedal, self._thr, self._brk = self.steer, 1, 0.0, 0.0
             was, self.boosting = self.boosting, False
             self.braking = pedal == 2
             if pedal == 3 and (self.boost_lock or not (self.battery > 0 and (was or self.battery >= BOOST_MIN))):   # locked or nothing to give: throttle
                 pedal = 0
             tr = traction if hill else 1   # (a light car can't put its power or its brakes down)
-            if pedal == 0:
-                if self.speed < top:
-                    self.speed = min(top, self.speed + ACCEL * tr)
-            elif pedal == 3:
-                self.speed = min(top * (1 + BOOST_TOP), self.speed + ACCEL * BOOST_ACCEL * tr)
-                self.battery = max(0.0, self.battery - BOOST_DRAIN)
-                self.boosting = True
-            elif pedal == 2:
-                self.speed = max(0.0, self.speed - BRAKE * tr)
-                if is_f1(self.gen):
-                    self.battery = min(1.0, self.battery + REGEN)
-            else:
-                self.speed *= COAST_DRAG
-            if hill:   # gravity along the slope: coasting downhill gains speed, braking downhill takes longer
-                self.speed = max(0.0, self.speed - HILL_G * ge)
-            if is_f1(self.gen) and not self.boosting:   # no recharge while boosting: a boost ends when the battery is empty
-                self.battery = min(1.0, self.battery + BATTERY_RECHARGE)
+            # a car that handles like a real one (docs/engine.md): tyre forces, mass, load; see dynamics()
             self.steer += max(-STEER_RATE, min(STEER_RATE, turn - self.steer))
             if abs(self.steer) < 1e-9:
                 self.steer = 0.0
-            if self.steer != 0:
-                self.speed *= 1 - (1 - SCRUB) * abs(self.steer)
-            # Tyres and drift (same as the browser): the body turns as the wheels ask, up to YAW_K x the grip; the
-            # direction of travel bends toward it by at most the grip. Past the grip the car slides: a drift.
-            delta = self.steer * MAX_STEER * grip
-            if self.speed != 0:
-                lim = LAT_GRIP * grip / self.speed
-                if hill and self.steer != 0 and T.bank[k] != 0:   # banking: more grip turning into the bank, less off-camber
-                    K = corner_curv(T)[k]   # (the bank fades out below |K| = BANK_FADE, so it's 0 on a straight)
-                    side = 1 if (self.steer > 0) == (K > 0) else -1
-                    lim = max(0.2 * lim, lim + BANK_GRIP * math.sin(T.bank[k]) * side / self.speed)
-                if delta != 0:
-                    self.angle += max(-lim * YAW_K, min(lim * YAW_K, (self.speed / WHEELBASE) * math.tan(delta)))
-                slip0 = math.atan2(math.sin(self.angle - self.dir), math.cos(self.angle - self.dir))
-                held = lim * (1 - (1 - SLIDE_GRIP) * min(1.0, abs(slip0) / 0.4))
-                bend = max(-held, min(held, slip0))
-                use = abs(bend) / lim
-                self.dir += bend
-                self.speed *= 1 - TYRE_DRAG * use * use - DRIFT_SCRUB * abs(math.sin(slip0 - bend))
-            else:
-                self.dir = self.angle
-            self.x += math.cos(self.dir) * self.speed
-            self.y += math.sin(self.dir) * self.speed
+            if pedal == 3:
+                self.battery = max(0.0, self.battery - BOOST_DRAIN)
+                self.boosting = True
+            elif pedal == 2 and is_f1(self.gen):
+                self.battery = min(1.0, self.battery + REGEN)
+            if is_f1(self.gen) and not self.boosting:
+                self.battery = min(1.0, self.battery + BATTERY_RECHARGE)
+            self.dynamics(pedal, top, grip, tr, ge if hill else 0.0, T.roll[k] if hill else 0.0, k if hill else self.seg)
         else:
             turn = None if stunned else self.action - 1
             if turn is None:
@@ -1276,6 +1277,84 @@ class Car:
             self.finished, self.reason = True, "finished"
         self.vx, self.vy = self.x - ox, self.y - oy
         self.yaw = math.atan2(math.sin(self.angle - oa), math.cos(self.angle - oa))
+
+    def dynamics(self, pedal: int, top: float, grip: float, tr: float, ge: float, roll: float, k: int) -> None:
+        """One frame of the car as a real one (N3, N2, N1): see CG_FRONT. Moves x, y, angle; sets speed, dir and yaw_r."""
+        L = WHEELBASE
+        a, b = CG_FRONT * L, (1 - CG_FRONT) * L
+        ca, sa = math.cos(self.angle), math.sin(self.angle)
+        rel = self.dir - self.angle
+        u, v, r = self.speed * math.cos(rel), self.speed * math.sin(rel), self.yaw_r   # body frame: forward, to the right
+        d = self.steer * MAX_STEER
+        cd, sd = math.cos(d), math.sin(d)
+        mu = LAT_GRIP * grip * TYRE_MU
+        B = math.tan(math.pi / (2 * TYRE_C)) / TYRE_PEAK
+        kf, kr = 1 + a * a / YAW_R2, 1 + b * b / YAW_R2   # (how fast a force at each axle moves that axle sideways)
+        boost_top = top * (1 + BOOST_TOP)
+        drive = 0.0
+        if pedal == 0 and u < top:
+            drive = min(DRIVE, POWER / max(u, 0.1)) * tr * self._thr
+        elif pedal == 3 and u < boost_top:
+            drive = min(DRIVE * BOOST_ACCEL, POWER * BOOST_ACCEL / max(u, 0.1)) * tr * self._thr
+        brake = BRAKE * tr * self._brk if pedal == 2 else 0.0
+        g_lat = 0.0
+        if roll:   # a banked road: gravity across it, toward its low edge (+ roll = left edge higher: to the right)
+            P = self.track.pts
+            k2 = (k + 1) % len(P)
+            tx, ty = P[k2][0] - P[k][0], P[k2][1] - P[k][1]
+            tl = math.hypot(tx, ty) or 1
+            nx, ny = -ty / tl, tx / tl
+            g_lat = BANK_GRIP * math.sin(roll)
+            gx, gy = nx * g_lat, ny * g_lat   # (world)
+        dt = 1.0 / DYN_SUB
+        ax = self._ax
+        for _ in range(DYN_SUB):
+            fzf = max(0.1, (b - CG_H * ax) / L)
+            fzr = max(0.1, (a + CG_H * ax) / L)
+            # front wheel, in its own frame
+            vf = v + a * r
+            uw, vw = u * cd + vf * sd, -u * sd + vf * cd
+            cap = mu * fzf
+            fy = -cap * math.sin(TYRE_C * math.atan(B * math.atan2(vw, abs(uw))))
+            fx = -math.copysign(min(brake * BRAKE_FRONT, abs(uw) / dt), uw) if brake else 0.0
+            n = math.hypot(fx, fy)
+            if n > cap:
+                fx, fy = fx * cap / n, fy * cap / n
+            if abs(fy) * dt * kf > abs(vw):   # (never past zero slip in one step: low speed stays steady)
+                fy = math.copysign(abs(vw) / (dt * kf), fy)
+            ffx, ffy = fx * cd - fy * sd, fx * sd + fy * cd   # (body frame)
+            # rear
+            vr = v - b * r
+            cap = mu * fzr
+            ry = -cap * math.sin(TYRE_C * math.atan(B * math.atan2(vr, abs(u))))
+            rx = drive - (math.copysign(min(brake * (1 - BRAKE_FRONT), abs(u) / dt), u) if brake else 0.0)
+            n = math.hypot(rx, ry)
+            if n > cap:
+                rx, ry = rx * cap / n, ry * cap / n
+            if abs(ry) * dt * kr > abs(vr):
+                ry = math.copysign(abs(vr) / (dt * kr), ry)
+            fxb, fyb = ffx + rx, ffy + ry
+            if g_lat:
+                fxb += gx * ca + gy * sa
+                fyb += -gx * sa + gy * ca
+            mz = a * ffy - b * ry
+            u += (fxb + v * r) * dt
+            v += (fyb - u * r) * dt
+            r += mz / YAW_R2 * dt
+            ax = fxb
+            self.angle += r * dt
+            ca, sa = math.cos(self.angle), math.sin(self.angle)
+            self.x += (u * ca - v * sa) * dt
+            self.y += (u * sa + v * ca) * dt
+        self._ax = ax
+        u *= COAST_DRAG
+        if ge:   # gravity along the slope (as today)
+            u -= HILL_G * ge
+        if u > (boost_top if self.boosting else top):   # (over the top speed: the engine holds it back)
+            u = max(top, u - ACCEL) if is_f1(self.gen) else top
+        self.yaw_r = r
+        self.speed = math.hypot(u, v)
+        self.dir = self.angle + math.atan2(v, u) if self.speed > 1e-9 else self.angle
 
     def pit_enter(self, lane: dict) -> bool:
         """Called in and at the lane's start (and not on its last lap): into the pit lane. True if it turned in."""
@@ -1347,7 +1426,7 @@ class Car:
         slope = self._pit_lat(lane, min(lane["len"], u + 1)) - lat
         self.x, self.y = x + nx * lat, y + ny * lat
         self.angle = self.dir = math.atan2(-nx, ny) + math.atan(slope)
-        self.steer, self.stun, self.slip = 0.0, 0, 0.0
+        self.steer, self.stun, self.slip, self.yaw_r = 0.0, 0, 0.0, 0.0
         self.frames += 1
         self.distance = self.pit_d0 + (u - self.pit_u0)
         self.max_distance = max(self.max_distance, self.distance)
@@ -1451,6 +1530,7 @@ class Car:
         if not placed:
             self.x, self.y, self.angle = ox + nx, oy + ny, oa
         self.dir = math.atan2(rvy, rvx) if math.hypot(rvx, rvy) > 1e-6 else self.angle
+        self.yaw_r = 0.0
 
     def pose(self) -> list:
         """[x, y, angle, distance, health, battery, boosting, braking, pit, action] per recorded step. Every car has all ten:
@@ -1580,6 +1660,7 @@ class World:
                     for car in (a, b):
                         if not car.dead and not calm:
                             car.speed *= CONTACT_SLOWDOWN
+                            car.yaw_r *= CONTACT_SLOWDOWN   # (the turn keeps its curvature: the yaw rate slows with the car)
                             car.contacts += 1
                             car.hurt(closing, CAR_DAMAGE)
 

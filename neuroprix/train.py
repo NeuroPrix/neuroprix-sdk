@@ -41,7 +41,7 @@ from torch.distributions import Categorical
 
 from neuroprix.browser_env import RaceEnv, load_track_spec
 from neuroprix.env import SimEnv, sim   # (sim: the race engine)
-from neuroprix.brain import DEFAULT_LAYOUT, OLD_INPUTS, OLD_SENSES, GEN_OF_SHAPE, LAYOUTS, N_HIDDEN, PEDALS, SENSES, TIER_OF_GEN, TIERS, RaceBrain, gen_of, generation, heads_action, layout_outputs, load_layout, load_weights, pick_action, relayout, save_brain, state_to_obs  # noqa: E402
+from neuroprix.brain import PROP_BASE, PROP_PEDAL, PROP_STEER, DEFAULT_LAYOUT, OLD_INPUTS, OLD_SENSES, GEN_OF_SHAPE, LAYOUTS, N_HIDDEN, PEDALS, SENSES, TIER_OF_GEN, TIERS, RaceBrain, gen_of, generation, heads_action, layout_outputs, load_layout, load_weights, pick_action, relayout, save_brain, state_to_obs  # noqa: E402
 
 # Rewards (per step of 4 frames). Further along the track is a better episode.
 # A step with no new best distance pays R_IDLE. A step that advances pays for every
@@ -152,7 +152,8 @@ class TrainPolicy(nn.Module):
             raise ValueError(f"the {self.layout} action layout isn't available in {tier.upper()}")
         self.shape, self.gen = (n_in, n_out), gen_of(n_in, n_out, self.layout)
         self.sizes = ([3, self.pedals] if layout is None and self.pedals else [n_out] if layout in (None, "combined")
-                      else [3, self.pedals] if layout == "two_head" else [3, 3, 2])
+                      else [3, self.pedals] if layout == "two_head"
+                      else [PROP_STEER, PROP_PEDAL] + ([2] if self.pedals == 4 else []) if layout == "proportional" else [3, 3, 2])
         self.summed = layout is None and len(self.sizes) == 2   # (two heads exported as one combined layer)
         self.split = len(self.sizes) > 1   # (several heads)
         self.fc1 = nn.Linear(n_in, N_HIDDEN)
@@ -187,6 +188,8 @@ class TrainPolicy(nn.Module):
 
     def env_action(self, a: int) -> int:
         """The car's action for a training action (they're the same unless there are three heads)."""
+        if self.layout == "proportional":   # (the heads' choices in mixed radix are exactly the car's proportional action)
+            return PROP_BASE + int(a)
         return heads_action(a % 3, (a // 3) % 3, a // 9) if self.layout == "three_head" else int(a)
 
     def log_prob_entropy(self, x, a):
@@ -306,7 +309,8 @@ def collect(job: dict) -> dict:
             rolling = round(random.uniform(0.5, 0.8), 3)
         _ENV.setup_world(spec, n_cars, random_start=start != "grid", tier=tier, speed_cap=job.get("speed_cap", 1.0),
                          fragile=job.get("fragile", False), caps=caps, gen=gen,
-                         gens=[league[i].gen if i in league else gen for i in range(n_cars)], rolling=rolling)
+                         gens=[league[i].gen if i in league else gen for i in range(n_cars)], rolling=rolling,
+                         race_grip=True)   # (a race day's grip each episode: races vary it)
         slow |= set(league)   # (nobody learns from a league car's moves either)
         states = _ENV.reset_world()
         if start == "spun" and hasattr(_ENV, "_cars"):   # about half the cars standing, turned 90-180 degrees off the track
@@ -373,7 +377,8 @@ def collect(job: dict) -> dict:
                         elif after < 0:   # losing a place (its own setting; by default the same as a pass is worth)
                             traj[i]["rew"][-1] += rw.get("lose_place", -rw["overtake"])
                             lost += i not in slow
-                d = actions[i] % 3 - 1   # steering part of the action (N4 and N3 alike)
+                a_i = int(actions[i])   # the steering part of the action (proportional: its level, -1..1)
+                d = ((a_i - PROP_BASE) % PROP_STEER - (PROP_STEER - 1) // 2) / ((PROP_STEER - 1) // 2) if a_i >= PROP_BASE else a_i % 3 - 1
                 if last_dir[i] is not None:
                     traj[i]["rew"][-1] += job["rewards"]["steer_flip"] * abs(d - last_dir[i]) / 2
                 last_dir[i] = d
@@ -539,11 +544,27 @@ def _pose(s: dict, act: int | None = None) -> list:
             (1 if s["braking"] else 0) if "braking" in s else None, act]
 
 
-def _drive(env, model, gen, tier, spec, cars, max_steps, record=None, others=None):
+def _senses(x) -> str:
+    """One decision's senses for the replay (the Train page lights its brain view with them): base64 of uint16 x 10000.
+    Exact: the engine's inputs are 4 decimals, 0..1 (game/trainer.js sensesOf)."""
+    import base64
+    import struct
+    return base64.b64encode(struct.pack(f"<{len(x)}H", *(round(min(1.0, max(0.0, float(v))) * 10000) for v in x))).decode()
+
+
+def replay_net(model) -> dict:
+    """The network that drove a replay, exactly (float32 to 9 significant digits round-trips; game/trainer.js replayNet)."""
+    layer = lambda fc: {"weight": [[float(f"{v:.9g}") for v in row] for row in fc.weight.tolist()],
+                        "bias": [float(f"{v:.9g}") for v in fc.bias.tolist()]}
+    return {"fc1": layer(model.fc1), "fc2": layer(model.fc2), "action_layout": model.layout}
+
+
+def _drive(env, model, gen, tier, spec, cars, max_steps, record=None, others=None, senses=None):
     """One run: car 0 drives its most likely action; any other cars drive the same brain with its natural
     randomness (identical deterministic cars would just pile into each other). Returns car 0's end state,
     the race length in px and car 0's touches. record: car 0's path; others: the other cars' paths and how
-    each one ended (for the replay on the Train page)."""
+    each one ended (for the replay on the Train page); senses: car 0's inputs at each decision (_senses), the one taking
+    it from record[t] to record[t + 1]."""
     info = env.setup_world(spec, cars, tier=tier, gen=gen)
     states = env.reset_world()
     n, touches, steps, walls = len(states), 0, 0, 0
@@ -556,7 +577,10 @@ def _drive(env, model, gen, tier, spec, cars, max_steps, record=None, others=Non
         if 0 not in live:
             break
         with torch.no_grad():
-            logits = model(torch.stack([state_to_obs(states[k], gen) for k in live]))
+            obs = torch.stack([state_to_obs(states[k], gen) for k in live])
+            logits = model(obs)
+        if senses is not None:
+            senses.append(_senses(obs[0].tolist()))   # (car 0 is live[0])
         acts = [0] * n
         for j, k in enumerate(live):
             acts[k] = pick_action(logits[j], model.layout, greedy=k == 0)
@@ -579,7 +603,7 @@ def _drive(env, model, gen, tier, spec, cars, max_steps, record=None, others=Non
 CHECK_WALLS = 1.0   # how much wall contact counts in the checks (--check-walls)
 
 
-def evaluate(env, model, specs, cars, max_steps, record=None, preview=None, show=0):
+def evaluate(env, model, specs, cars, max_steps, record=None, preview=None, show=0, senses=None):
     """How good is this brain? On each circuit it drives alone (pure driving) and, with traffic, as car 0 of the
     field. Score = 60% solo progress + 40% progress in traffic (fractions of the race), minus 0.05 per touch per
     100 steps in traffic (a rate, so surviving longer is never punished; at most 0.2), minus 0.2 x the health
@@ -594,7 +618,8 @@ def evaluate(env, model, specs, cars, max_steps, record=None, preview=None, show
     results, scores = [], []
     for i, spec in enumerate(specs):
         show_this = i == show and record is not None
-        s0, info, _, solo_steps = _drive(env, model, gen, tier, spec, 1, max_steps, record if show_this and cars == 1 else None)
+        s0, info, _, solo_steps = _drive(env, model, gen, tier, spec, 1, max_steps, record if show_this and cars == 1 else None,
+                                         senses=senses if show_this and cars == 1 else None)
         walls = info.get("walls", 0)
         total = info["length"] * info["laps"]
         solo = min(1.0, max(0.0, s0["distance"]) / total)
@@ -603,7 +628,8 @@ def evaluate(env, model, specs, cars, max_steps, record=None, preview=None, show
             preview.update(others=[], progress=round(solo, 4), finished=s0["finished"], reason=s0["reason"] or "timeout")
         if cars > 1:
             others = [] if show_this else None
-            t0, _, touches, steps = _drive(env, model, gen, tier, spec, cars, max_steps, record if show_this else None, others)
+            t0, _, touches, steps = _drive(env, model, gen, tier, spec, cars, max_steps, record if show_this else None, others,
+                                           senses if show_this else None)
             traffic = min(1.0, max(0.0, t0["distance"]) / total)
             if show_this and preview is not None:
                 preview.update(others=others, progress=round(traffic, 4), finished=t0["finished"], reason=t0["reason"] or "timeout")
@@ -616,13 +642,13 @@ def evaluate(env, model, specs, cars, max_steps, record=None, preview=None, show
     return sum(scores) / len(scores), results
 
 
-def preview_drive(env, model, spec, cars, max_steps, record, preview) -> None:
+def preview_drive(env, model, spec, cars, max_steps, record, preview, senses=None) -> None:
     """The replay shown on the Train page, on a circuit that isn't part of the score (Surprise tracks sessions get a fresh
     one at every check): the field if the session trains in traffic, else the driver alone."""
     gen = generation(model)
     tier = TIER_OF_GEN.get(gen, "n4")
     others = [] if cars > 1 else None
-    t0, info, _, _ = _drive(env, model, gen, tier, spec, cars, max_steps, record, others)
+    t0, info, _, _ = _drive(env, model, gen, tier, spec, cars, max_steps, record, others, senses)
     total = info["length"] * info["laps"]
     preview.update(others=others or [], progress=round(min(1.0, max(0.0, t0["distance"]) / total), 4),
                    finished=t0["finished"], reason=t0["reason"] or "timeout")
@@ -877,7 +903,9 @@ def main() -> None:
         with torch.no_grad():   # gentle start; an N3 newborn leans a little on the throttle (pedal head: 0 = accelerate)
             policy.head.weight.mul_(0.1)
             policy.head.bias.zero_()
-            if policy.split:
+            if policy.layout == "proportional":   # (a lean on full throttle; boost at even odds)
+                policy.head.bias[PROP_STEER + PROP_PEDAL - 1] += 0.5
+            elif policy.split:
                 policy.head.bias[3] += 0.5
                 if policy.pedals == 4 and policy.layout != "three_head":   # N2: Boost starts as likely as the throttle
                     policy.head.bias[6] += 0.5                              # (three heads: its own head, at even odds)
@@ -935,31 +963,20 @@ def main() -> None:
     def run_check(model):
         """Score the brain on the fixed test circuits (fair between checkpoints) and record the replay you watch: on a
         brand-new circuit for Surprise tracks sessions, else on the session's circuits in turn."""
-        path, preview, cap = [], {}, max(2500, args.max_steps * 3)
+        path, preview, cap, senses = [], {}, max(2500, args.max_steps * 3), []
         if args.random_tracks:
             score, res = evaluate(env, model, eval_specs, cars, cap)
             spec = {"seed": random.randrange(1_000_000)}
-            preview_drive(env, model, spec, cars, cap, path, preview)
+            preview_drive(env, model, spec, cars, cap, path, preview, senses)
         else:
             k = n_checks[0] % len(eval_specs)
             spec = eval_specs[k]
-            score, res = evaluate(env, model, eval_specs, cars, cap, record=path, preview=preview, show=k)
+            score, res = evaluate(env, model, eval_specs, cars, cap, record=path, preview=preview, show=k, senses=senses)
         preview["spec"] = spec
+        preview["senses"], preview["net"] = senses, replay_net(model)   # (the Train page's brain view: this car's thinking)
         n_checks[0] += 1
         return score, res, path, preview
-    last_net = [0.0]
-
-    def send_net(update: int) -> None:
-        """The brain's weights now (rounded), for the Train page's live brain view: at the start, every few seconds, at checks."""
-        if not args.progress_json:
-            return
-        last_net[0] = time.time()
-        rb = policy.export()
-        layer = lambda fc: {"weight": [[round(v, 4) for v in row] for row in fc.weight.tolist()],
-                            "bias": [round(v, 4) for v in fc.bias.tolist()]}
-        print(json.dumps({"event": "net", "update": update, "action_layout": rb.layout, "fc1": layer(rb.fc1), "fc2": layer(rb.fc2)}), flush=True)
     try:
-        send_net(0)
         if args.resume:   # a session that only makes things worse keeps the starting weights
             score, res, path, preview = run_check(policy.export())
             best, best_key = score, (round(score - args.start_margin, 3), -sum(r["time"] for r in res))
@@ -1021,8 +1038,6 @@ def main() -> None:
                 event="update", update=update, avg_return=round(ret_sum / nt, 2), avg_distance=round(n / nt * 4 * 4, 1),
                 car_contacts=round(contacts / nt, 3), damage=round(damage / nt, 3), wall_frames=round(walls / nt, 1), passes=round(passes / nt, 3), elapsed=round(time.time() - t0, 1))
             checking = update % args.eval_every == 0 or update == args.updates
-            if checking or time.time() - last_net[0] >= 4.0:
-                send_net(update)
             if checking:
                 score, res, path, preview = run_check(policy.export())
                 key = (round(score, 3), -sum(r["time"] for r in res))

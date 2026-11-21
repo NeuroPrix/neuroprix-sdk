@@ -40,16 +40,21 @@ PEDALS = {"n3": 3, "n2": 4, "n1": 4}                 # pedal choices per tier (N
 #   combined    one choice over every pedal x steering pair (action = pedal x 3 + steer; Boost is pedal 3)
 #   two_head    steering (3) + pedal (N3: gas / coast / brake; N2, N1: + boost), each chosen alone
 #   three_head  steering (3) + pedal (gas / coast / brake) + boost (off / on): N2 and N1 only
-LAYOUTS = ("combined", "two_head", "three_head")
-# A new brain's layout when none is asked for (docs/brain-format.md: three_head measured cleanest for N1). A brain that
-# continues keeps its own; other classes train two heads and save them as combined, as always.
-DEFAULT_LAYOUT = {"n1": "three_head"}
+#   proportional steering in PROP_STEER levels (full left .. full right) + pedal in PROP_PEDAL (full brake, half brake,
+#               coast, half throttle, full throttle) + boost (off / on; N2 and N1): 14 outputs (N3: 12). The car's action
+#               is PROP_BASE + steer + 7 x pedal + 35 x boost (backend/sim.py controls)
+LAYOUTS = ("combined", "two_head", "three_head", "proportional")
+PROP_STEER, PROP_PEDAL, PROP_BASE = 7, 5, 1000
+# A new brain's layout when none is asked for: proportional for every class with pedals (docs/engine.md: on/off
+# controls can't tame a car that handles like a real one). A brain that continues keeps its own; N4 steers only.
+DEFAULT_LAYOUT = {"n1": "proportional", "n2": "proportional", "n3": "proportional"}
 
 
 def layout_outputs(tier: str, layout: str) -> int | None:
     """A class's output count with this layout (None: not allowed for it)."""
     p = PEDALS.get(tier, 0)
-    return {"combined": 3 * p if p else 3, "two_head": 3 + p if p else None, "three_head": 8 if p == 4 else None}.get(layout)
+    return {"combined": 3 * p if p else 3, "two_head": 3 + p if p else None, "three_head": 8 if p == 4 else None,
+            "proportional": PROP_STEER + PROP_PEDAL + (2 if p == 4 else 0) if p else None}.get(layout)
 
 
 def gen_of(n_in: int, n_out: int, layout: str = "combined") -> int:
@@ -106,6 +111,10 @@ def pick_action(logits: torch.Tensor, layout: str, greedy: bool) -> int:
         return pick(logits[3:]) * 3 + pick(logits[0:3])
     if layout == "three_head":
         return heads_action(pick(logits[0:3]), pick(logits[3:6]), pick(logits[6:8]))
+    if layout == "proportional":
+        n = PROP_STEER + PROP_PEDAL
+        b = pick(logits[n:n + 2]) if logits.shape[-1] > n else 0
+        return PROP_BASE + pick(logits[0:PROP_STEER]) + PROP_STEER * pick(logits[PROP_STEER:n]) + PROP_STEER * PROP_PEDAL * b
     return pick(logits)
 
 

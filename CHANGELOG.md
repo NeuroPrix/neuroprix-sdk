@@ -5,6 +5,21 @@ version may need you to change your own trainer; minor and patch versions don't.
 (`neuroprix.ENGINE_VERSION`, e.g. `2026.11.2`), shown by `neuroprix-runner --version`; when it changes, update the SDK
 so you train on the same physics the races use.
 
+## 0.3.2 (unreleased)
+
+- **Cars that handle like real ones** (engine 2026.11.9; [docs/engine.md](docs/engine.md#how-the-car-handles)): N3,
+  N2 and N1 cars are a physical model. Tyre forces come from slip at both axles; the body has yaw inertia; load moves
+  under braking and power; one grip is shared between turning, braking and driving; rear-wheel drive has a motor's
+  power; the brakes are biased to the front; and gravity acts across banks. The rule-based drift and its constants
+  are gone. Brains trained on 2026.11.8 still load but drive a different car: train them again.
+- **Proportional controls** ([docs/brain-format.md](docs/brain-format.md#action-layouts)): a new action layout,
+  `proportional`, with steering in 7 levels, the pedal in 5 (full and half brake, coast, half and full throttle) and
+  boost (N3 12 outputs, N2 / N1 14). It's the default for new N3, N2 and N1 brains (`neuroprix-train` and the
+  server's sessions). `neuroprix.engine.controls(action)` reads any action; proportional actions are 1000 and up.
+- **Training on a race day's grip:** `neuroprix-train` runs each episode at a grip between 0.94 and 1.06, as races
+  vary it (`neuroprix.env.SimEnv.setup_world(..., race_grip=True)`; off by default).
+- The coach's corner-speed marks (`corner_limits`) use 88% of the grip, what the car really holds steadily.
+
 ## 0.3.1 (2026-11-19)
 
 - **The first 20% of damage costs no speed, and the radar sees further ahead** (engine 2026.11.8): a car keeps all of
