@@ -18,6 +18,11 @@ TRAIN_GRIP = (0.94, 1.06)   # each training episode on a race day's grip, as rac
 GEN_OF_TIER = {"n4": 16, "n3": 17, "n2": 18, "n1": 19}   # each class's brain kind for new brains: the senses a real car could measure
 KINDS = (16, 17, 18, 19)   # brain kinds a training car can have (docs/observations-and-actions.md)
 MAX_CARS = 10                                         # a training field: up to a full race grid
+# Surprise tracks: a pool of built circuits. Building a Grand Prix circuit (its layout and track map) takes about 50 ms,
+# a sizeable share of a short practice run, so each worker keeps POOL_SIZE random circuits built per class and an
+# episode builds a new one (replacing the oldest) only POOL_FRESH of the time. Over a session a driver still meets
+# thousands of different circuits. (A circuit's track map is about 15 MB: POOL_SIZE of them per worker.)
+POOL_SIZE, POOL_FRESH = 6, 0.25
 
 
 class _NoBrain:
@@ -46,19 +51,44 @@ class SimEnv:
         self.race_grip = False
         self.track_info: dict = {}
         self._specs: dict = {}   # recent circuits, built once (building one is the slowest part of a reset). A Grand
-        # Prix circuit's track map is about 15 MB, so only a few are kept: gyms (few, reused) and the last 2 random ones
+        # Prix circuit's track map is about 15 MB, so only a few are kept: gyms (few, reused) and the last few
+        # numbered ones (the pool's POOL_SIZE, and 2 more)
+        self._pool: dict = {}    # each class's pool of random circuits (their numbers): pool_seed
 
     def _build(self, spec: dict, cls: str | None = None):
         gym = bool(spec and spec.get("control"))
         key = ("gym", repr(spec)) if gym else ("seed", spec.get("seed", 1) if spec else 1, cls)
         T = self._specs.get(key)
         if T is None:   # (a circuit's number gives the class's version of it: N1's has hills)
-            T = sim.build_track(spec if gym else sim.generate_track_spec(key[1], cls))
+            T = self._new_track(spec if gym else self._generate(key[1], cls))
             same = [k for k in self._specs if k[0] == key[0]]
-            if len(same) >= (8 if gym else 2):
+            if len(same) >= (8 if gym else POOL_SIZE + 2):
                 self._specs.pop(same[0])
             self._specs[key] = T
         return T
+
+    def _generate(self, seed: int, cls: str | None):   # (a numbered circuit's spec; the Rust engine has its own)
+        return sim.generate_track_spec(seed, cls)
+
+    def _new_track(self, spec: dict):   # (a built track; the Rust engine builds its own)
+        return sim.build_track(spec)
+
+    def pool_seed(self, seed: int, tier: str = "n3") -> int:
+        """Surprise tracks: the circuit for an episode, given a new random circuit's number: that one (built and added to
+        the pool) while the pool is filling and POOL_FRESH of the time after, else one of the pool's, at random."""
+        pool = self._pool.setdefault("n1" if str(tier).lower() == "n1" else None, [])
+        if len(pool) >= POOL_SIZE and random.random() >= POOL_FRESH:
+            return random.choice(pool)
+        pool.append(seed)
+        if len(pool) > POOL_SIZE:
+            pool.pop(0)
+        return seed
+
+    def twin(self) -> "SimEnv":
+        """Another environment sharing this one's built circuits and pool (a worker's episodes side by side)."""
+        other = type(self)(self.tracks, random_tracks=self.random_tracks)
+        other._specs, other._pool = self._specs, self._pool
+        return other
 
     def setup_world(self, spec: dict, cars: int = 1, random_start: bool = False, tier: str = "n3", speed_cap: float = 1.0,
                     fragile: bool = False, caps: list[float] | None = None, gen: int | None = None,
@@ -72,20 +102,30 @@ class SimEnv:
         self.random_start = bool(random_start)
         self.race_grip = bool(race_grip)
         self.rolling = _clamp(float(rolling or 0), 0.0, 1.0)
-        n = int(_clamp(int(cars or 1), 1, MAX_CARS))
-        g = gen if gen in KINDS else GEN_OF_TIER.get(str(tier).lower() if str(tier).lower() == "n1" else sim.norm_class(tier, "n3"), 5)
-        gens = gens or []
-        caps = caps or []
+        kinds, caps = self._field(cars, tier, gen, gens, caps)
         self._cars = []
-        for i in range(n):
-            gi = gens[i] if i < len(gens) and gens[i] in KINDS else g
+        for i, (gi, cap) in enumerate(zip(kinds, caps)):
             c = sim.Car(track=T, brain=_NoBrain(gi), name=str(i))
             c.training, c.touched = True, {}
-            c.cap_k = _clamp(float(caps[i]) if i < len(caps) and caps[i] else 1.0, 0.3, 1.0)
+            c.cap_k = cap
             c.world_cap = _clamp(float(speed_cap or 1.0), 0.2, 1.0)
             c.fragile = bool(fragile)
             self._cars.append(c)
             self.world.cars.append(c)
+        return self._info(T, len(kinds))
+
+    @staticmethod
+    def _field(cars, tier, gen, gens, caps) -> tuple[list[int], list[float]]:
+        """The field setup_world puts out: each car's brain kind and its top-speed factor."""
+        n = int(_clamp(int(cars or 1), 1, MAX_CARS))
+        g = gen if gen in KINDS else GEN_OF_TIER.get(str(tier).lower() if str(tier).lower() == "n1" else sim.norm_class(tier, "n3"), 5)
+        gens = gens or []
+        caps = caps or []
+        return ([gens[i] if i < len(gens) and gens[i] in KINDS else g for i in range(n)],
+                [_clamp(float(caps[i]) if i < len(caps) and caps[i] else 1.0, 0.3, 1.0) for i in range(n)])
+
+    @staticmethod
+    def _info(T, n: int) -> dict:
         return {"name": T.spec.get("name", ""), "length": round(T.L), "width": T.width, "laps": T.laps,
                 "obstacles": len(T.spec.get("obstacles", [])), "cars": n, "people": 0}
 
@@ -128,6 +168,20 @@ class SimEnv:
         for c in cars:
             c.sense(W)
         return [self._state(c) for c in cars]
+
+    def spin(self, i: int, turn: float, room: float | None = None) -> None:
+        """A spun start: car i turned by turn radians where it stands, stopped; room: how far back (px) it may go before
+        it's out (practice only, to turn round). Then sense_all."""
+        c = self._cars[i]
+        c.angle += turn
+        c.dir, c.speed, c.vx, c.vy = c.angle, 0.0, 0.0, 0.0
+        c.wrong_way_px = room or c.wrong_way_px
+
+    def sense_all(self) -> list[dict]:
+        """Every car senses where it is now; their states."""
+        for c in self._cars:
+            c.sense(self.world)
+        return [self._state(c) for c in self._cars]
 
     def step_world(self, actions: list[int]) -> list[dict]:
         W = self.world

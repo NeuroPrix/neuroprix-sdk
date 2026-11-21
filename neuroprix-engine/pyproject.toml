@@ -1,0 +1,28 @@
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "neuroprix-engine"
+version = "0.1.0"
+description = "Optional: NeuroPrix's race engine in Rust, for faster training with the neuroprix SDK. Same results as neuroprix.engine, step by step."
+readme = "README.md"
+license = "Apache-2.0"
+authors = [{ name = "NeuroPrix", email = "support@neuroprix.com" }]
+requires-python = ">=3.10"
+keywords = ["neuroprix", "reinforcement-learning", "racing", "simulation"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Programming Language :: Rust",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.urls]
+Homepage = "https://neuroprix.com"
+Source = "https://github.com/NeuroPrix/neuroprix-sdk/tree/main/neuroprix-engine"
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+module-name = "neuroprix_engine"

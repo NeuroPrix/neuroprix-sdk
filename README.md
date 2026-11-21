@@ -58,6 +58,7 @@ docker run -it -v neuroprix:/home/runner/.neuroprix neuroprix-runner --server ht
 | `neuroprix-runner` (`neuroprix.runner`) | Links a computer to your account, takes the sessions you start on the Train page, runs a trainer and sends back its progress and brains |
 | `neuroprix-train` (`neuroprix.train`) | NeuroPrix's own trainer (PPO): what the runner uses by default, and a baseline to run on its own, copy or change |
 | `neuroprix.engine`, `neuroprix.env` | The race engine: the same physics, circuits and senses the official races use (versioned) |
+| `neuroprix-engine` (optional, its own package) | The same engine in Rust, for faster training: exactly the same results; used only when you ask (`--engine rust`) and never instead of an `engine.py` you've changed ([docs/engine.md](docs/engine.md#the-optional-rust-engine-faster-training)) |
 | `neuroprix.brain` | Brains: the network for each class, saving and loading |
 
 ## Classes

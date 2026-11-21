@@ -419,12 +419,16 @@ def main() -> None:
     ap.add_argument("--trainer", default=os.environ.get("NEUROPRIX_TRAINER"),
                     help='your own trainer command, e.g. "python my_trainer.py" (default: NeuroPrix\'s PPO trainer). '
                          "It's run with --session <file>: see docs/trainer-contract.md")
+    ap.add_argument("--engine", choices=["python", "rust"], default="rust" if os.environ.get("NEUROPRIX_TRAIN_ENGINE") == "rust" else "python",
+                    help="the race engine NeuroPrix's trainer practises on: python (default) or rust (optional and faster: "
+                         "pip install neuroprix-engine; used only if it matches the Python engine exactly)")
     ap.add_argument("--relink", action="store_true", help="forget the current link and show a new code")
     ap.add_argument("--allow-http", action="store_true",
                     help="allow a plain http:// server that isn't this computer (unsafe: the runner's token travels "
                          "unencrypted; only for a server on your own network)")
     ap.add_argument("--version", action="version", version=f"neuroprix-runner {VERSION} (engine {engine_version() or 'unknown'})")
     args = ap.parse_args()
+    os.environ["NEUROPRIX_TRAIN_ENGINE"] = args.engine   # (the trainers it starts read it)
     trainer = shlex.split(args.trainer) if args.trainer else default_trainer()
     trainer_label = "custom: " + Path(trainer[-1]).name if args.trainer else "NeuroPrix PPO"
     cfg = {} if args.relink else load_config()
@@ -441,7 +445,8 @@ def main() -> None:
         cfg = pair(server, name, info)
     api = Api(server, cfg["token"])
     say(f"NeuroPrix Runner {VERSION}: \"{cfg.get('name', name)}\" on {server}, {args.workers} games in parallel, "
-        f"trainer: {' '.join(trainer[-2:]) if args.trainer else trainer_label}. Waiting for training sessions (Ctrl+C to quit).")
+        f"trainer: {' '.join(trainer[-2:]) if args.trainer else trainer_label}"
+        f"{', on the Rust engine if it matches the Python one' if args.engine == 'rust' and not args.trainer else ''}. Waiting for training sessions (Ctrl+C to quit).")
     quiet_since, warned_engine = None, False
     while True:
         try:

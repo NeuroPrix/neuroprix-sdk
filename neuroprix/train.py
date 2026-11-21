@@ -41,7 +41,8 @@ from torch.distributions import Categorical
 
 from neuroprix.browser_env import RaceEnv, load_track_spec
 from neuroprix.env import SimEnv, sim   # (sim: the race engine)
-from neuroprix.brain import PROP_BASE, PROP_PEDAL, PROP_STEER, DEFAULT_LAYOUT, OLD_INPUTS, OLD_SENSES, GEN_OF_SHAPE, LAYOUTS, N_HIDDEN, PEDALS, SENSES, TIER_OF_GEN, TIERS, RaceBrain, gen_of, generation, layout_heads, layout_move, layout_outputs, load_layout, load_weights, pick_action, relayout, save_brain, state_to_obs  # noqa: E402
+from neuroprix.rust_env import RustEnv, rust_ready   # (the optional Rust engine)
+from neuroprix.brain import PROP_BASE, PROP_PEDAL, PROP_STEER, DEFAULT_LAYOUT, OLD_INPUTS, OLD_SENSES, GEN_OF_INPUTS, GEN_OF_SHAPE, LAYOUTS, N_HIDDEN, PEDALS, SENSES, TIER_OF_GEN, TIERS, RaceBrain, gen_of, generation, layout_heads, layout_move, layout_outputs, load_layout, load_weights, pick_action, relayout, save_brain, state_to_obs  # noqa: E402
 
 # Rewards (per step of 4 frames). Further along the track is a better episode.
 # A step with no new best distance pays R_IDLE. A step that advances pays for every
@@ -165,7 +166,7 @@ class TrainPolicy(nn.Module):
     def dists(self, x):
         z, out, a = self(x), [], 0
         for n in self.sizes:
-            out.append(Categorical(logits=z[..., a:a + n]))
+            out.append(Categorical(logits=z[..., a:a + n], validate_args=False))   # (no argument checks: costly, and they always hold)
             a += n
         return out
 
@@ -237,14 +238,17 @@ class Critic(nn.Module):
 # ---------- experience collection (runs in worker processes) ----------
 _ENV = None
 # Where practice and checks run: "python" (backend/sim.py through agent/simenv.py: the engine races run in, about
-# twice as fast and much lighter than a browser per worker) or "browser" (the game page in headless Chromium).
-# Both give the trainer the same states, checked step by step.
+# twice as fast and much lighter than a browser per worker), "rust" (the optional neuroprix-engine package: the same
+# engine ported to Rust, exactly the same results, several times faster; only when asked, and only if rust_ready says
+# so: agent/rustenv.py) or "browser" (the game page in headless Chromium). All give the trainer the same states.
 ENGINE = os.environ.get("NEUROPRIX_TRAIN_ENGINE", "python")
 
 
 def make_env(engine: str = ENGINE, tracks: list | None = None, headed: bool = False):
     if engine == "browser" or headed:
         return RaceEnv(tracks or [{"seed": 1}], headless=not headed)
+    if engine == "rust":
+        return RustEnv(tracks or [{"seed": 1}])
     return SimEnv(tracks or [{"seed": 1}])
 
 
@@ -277,20 +281,25 @@ def _write_traces(job: dict, spec: dict, traces: list[dict]) -> None:
         pass
 
 
-def collect(job: dict) -> dict:
-    """Play some episodes with the given weights. Returns trajectories as plain lists (cheap to send)."""
-    tier, senses = job["tier"], job.get("senses", "real")
-    policy = TrainPolicy(tier, senses, job.get("layout"))
-    gen, critic = policy.gen, Critic(policy.shape[0])
-    policy.load_state_dict(job["policy"])
-    critic.load_state_dict(job["critic"])
-    random.seed(job["seed"])
-    torch.manual_seed(job["seed"])
-    rng = random.Random(job["seed"] + 1)   # (the league drivers' race temperature)
-    pool = _league(job.get("league") or [])
-    out, contacts, damage, walls, passes, lost = [], 0, 0.0, 0, 0, 0
-    rw = job["rewards"]
-    for spec in job["specs"]:
+def _env_for(k: int):
+    """The worker's k-th environment: a worker plays all its episodes side by side (collect), each in its own world;
+    they share the worker's built circuits."""
+    while len(_TWINS) <= k:
+        _TWINS.append(_ENV if not _TWINS else _ENV.twin())
+    return _TWINS[k]
+
+
+_TWINS: list = []
+
+
+class _Episode:
+    """One practice episode in a worker: its field of cars, who learns, and what each learner did and earned."""
+
+    def __init__(self, job: dict, env, spec: dict, pool: list, gen: int):
+        tier = job["tier"]
+        if spec.get("pool"):   # Surprise tracks: a circuit from the worker's pool (or a new one)
+            spec = {"seed": env.pool_seed(spec["seed"], tier)}
+        self.env, self.spec = env, spec
         n_cars = job["cars"]
         # league opponents: some cars driven by other drivers' frozen brains (each sensing with its own kind), drawn
         # afresh each episode; they're traffic, not learners
@@ -305,95 +314,151 @@ def collect(job: dict) -> dict:
         start, rolling = _start_mode(job.get("starts")), 0.0
         if start == "rolling":
             rolling = round(random.uniform(0.5, 0.8), 3)
-        _ENV.setup_world(spec, n_cars, random_start=start != "grid", tier=tier, speed_cap=job.get("speed_cap", 1.0),
-                         fragile=job.get("fragile", False), caps=caps, gen=gen,
-                         gens=[league[i].gen if i in league else gen for i in range(n_cars)], rolling=rolling,
-                         race_grip=True)   # (a race day's grip each episode: races vary it)
+        env.setup_world(spec, n_cars, random_start=start != "grid", tier=tier, speed_cap=job.get("speed_cap", 1.0),
+                        fragile=job.get("fragile", False), caps=caps, gen=gen,
+                        gens=[league[i].gen if i in league else gen for i in range(n_cars)], rolling=rolling,
+                        race_grip=True)   # (a race day's grip each episode: races vary it)
         slow |= set(league)   # (nobody learns from a league car's moves either)
-        states = _ENV.reset_world()
-        if start == "spun" and hasattr(_ENV, "_cars"):   # about half the cars standing, turned 90-180 degrees off the track
-            for i, c in enumerate(_ENV._cars):
+        self.league, self.slow = league, slow
+        states = env.reset_world()
+        if start == "spun":   # about half the cars standing, turned 90-180 degrees off the track
+            for i in range(len(states)):
                 if i not in league and random.random() < job.get("spun_share", 0.5):
-                    c.angle += random.choice((-1, 1)) * random.uniform(math.pi / 2, math.pi)
-                    c.dir, c.speed, c.vx, c.vy = c.angle, 0.0, 0.0, 0.0
-                    c.wrong_way_px = job.get("spun_room") or c.wrong_way_px   # (practice only: room to turn round)
-            for c in _ENV._cars:
-                c.sense(_ENV.world)
-            states = [_ENV._state(c) for c in _ENV._cars]
-        n = len(states)
-        last_touch = [[-10**6] * n for _ in range(n)]   # step when each pair last touched
-        traj = [{"obs": [], "act": [], "logp": [], "val": [], "rew": [], "last_val": 0.0} for _ in range(n)]
-        def pose(s, action):
-            return [round(s["x"], 1), round(s["y"], 1), round(s["angle"], 3), round(s["speed"], 3),
-                    action, round(s.get("steer") or 0, 3), s.get("box")]
-        traces = [[pose(s, None)] for s in states]
+                    env.spin(i, random.choice((-1, 1)) * random.uniform(math.pi / 2, math.pi), job.get("spun_room"))
+            states = env.sense_all()
+        self.states, n = states, len(states)
+        self.n = n
+        self.last_touch = [[-10**6] * n for _ in range(n)]   # step when each pair last touched
+        self.traj = [{"obs": [], "act": [], "logp": [], "val": [], "rew": [], "last_val": 0.0} for _ in range(n)]
+        self.traces = [[_trace_pose(s, None)] for s in states]
+        self.last_dir = [None] * n   # each car's previous steering choice: -1 left, 0 straight, +1 right
+        self.contacts, self.damage, self.walls, self.passes, self.lost = 0, 0.0, 0, 0, 0
+        self.live, self.mine = [], []
+
+    def begin_step(self) -> bool:
+        """Who is still racing, and the league cars' moves. False once nobody is."""
+        self.live = [i for i, s in enumerate(self.states) if not (s["dead"] or s["finished"])]
+        self.actions = [0] * self.n
+        for i in self.live:
+            if i in self.league:
+                self.actions[i] = self.league[i].act(self.states[i]["obs"])
+        self.mine = [i for i in self.live if i not in self.league]
+        return bool(self.live)
+
+    def end_step(self, job: dict, step: int, a, lp, v, obs) -> None:
+        """The learners' moves (row k of a, lp, v and obs for its k-th learner), one step of the world, and what each
+        learner earned for it."""
+        states, traj, n, rw = self.states, self.traj, self.n, job["rewards"]
+        actions, mine, slow, last_touch = self.actions, self.mine, self.slow, self.last_touch
+        if not mine:
+            self.states = self.env.step_world(actions)
+            return
+        for k, i in enumerate(mine):
+            actions[i] = a[k][1]   # (the car's action; the trajectory keeps the heads' choices)
+            t = traj[i]
+            t["obs"].append(obs[k]); t["act"].append(a[k][0]); t["logp"].append(lp[k]); t["val"].append(v[k])
+        nxt = self.env.step_world(actions)
         gamma = job.get("gamma", 0.99)
-        last_dir = [None] * n   # each car's previous steering choice: -1 left, 0 straight, +1 right
-        for step in range(job["max_steps"]):
-            live = [i for i, s in enumerate(states) if not (s["dead"] or s["finished"])]
-            if not live:
-                break
-            actions = [0] * n
-            for i in live:
-                if i in league:
-                    actions[i] = league[i].act(states[i]["obs"])
-            mine = [i for i in live if i not in league]
-            if not mine:
-                states = _ENV.step_world(actions)
-                continue
-            obs = torch.stack([state_to_obs(states[i], gen) for i in mine])
+        for i in range(n):
+            for j in nxt[i].get("touched", []):
+                if 0 <= j < n:
+                    last_touch[i][j] = last_touch[j][i] = step
+        for i in mine:
+            left = job["max_steps"] - step - 1
+            traj[i]["rew"].append(reward_for(states[i], nxt[i], rw, left, gamma))
+            if job.get("contact_blame") and nxt[i].get("contacts"):   # the car that caused a touch pays more for it
+                k = max([contact_blame(states[i], states[j]) for j in nxt[i].get("touched", []) if 0 <= j < n and j != i] or [1.0])
+                traj[i]["rew"][-1] += (k - 1) * rw["contact"] * nxt[i]["contacts"]
+            # places gained and lost on nearby cars that are still racing; a pass only counts if it was clean
+            if rw.get("overtake") and not nxt[i]["dead"]:
+                for j in range(n):
+                    if j == i or states[j]["dead"] or states[j]["finished"] or nxt[j]["dead"]:
+                        continue
+                    before = states[i]["distance"] - states[j]["distance"]
+                    after = nxt[i]["distance"] - nxt[j]["distance"]
+                    if abs(after) > PASS_NEAR_PX or (before > 0) == (after > 0) or before == 0:
+                        continue
+                    if after > 0 and step - last_touch[i][j] > PASS_CLEAN_STEPS:
+                        traj[i]["rew"][-1] += rw["overtake"]
+                        self.passes += i not in slow
+                    elif after < 0:   # losing a place (its own setting; by default the same as a pass is worth)
+                        traj[i]["rew"][-1] += rw.get("lose_place", -rw["overtake"])
+                        self.lost += i not in slow
+            a_i = int(actions[i])   # the steering part of the action (proportional: its level, -1..1)
+            d = ((a_i - PROP_BASE) % PROP_STEER - (PROP_STEER - 1) // 2) / ((PROP_STEER - 1) // 2) if a_i >= PROP_BASE else a_i % 3 - 1
+            if self.last_dir[i] is not None:
+                traj[i]["rew"][-1] += rw["steer_flip"] * abs(d - self.last_dir[i]) / 2
+            self.last_dir[i] = d
+            if i not in slow:
+                self.contacts += nxt[i].get("contacts", 0)
+                self.damage += nxt[i].get("damage", 0)
+                self.walls += nxt[i].get("hits", 0)
+            self.traces[i].append(_trace_pose(nxt[i], actions[i]))
+        self.states = nxt
+
+
+def _trace_pose(s, action):
+    return [round(s["x"], 1), round(s["y"], 1), round(s["angle"], 3), round(s["speed"], 3),
+            action, round(s.get("steer") or 0, 3), s.get("box")]
+
+
+OBS_LEN = {g: n for n, g in GEN_OF_INPUTS.items()}   # each brain kind's number of inputs
+
+
+def _obs_rows(states: list, gen: int) -> torch.Tensor:
+    """Several cars' states -> one input tensor (a row each), as state_to_obs does for one."""
+    want = OBS_LEN[gen]
+    rows = [s["obs"] for s in states]
+    for r in rows:
+        if len(r) != want:
+            raise ValueError(f"expected {want} features, got {len(r)}")
+    return torch.tensor(rows, dtype=torch.float32).clamp_(0.0, 1.0)
+
+
+def collect(job: dict) -> dict:
+    """Play some episodes with the given weights. Returns trajectories as plain lists (cheap to send). A worker plays
+    all its episodes side by side, so the brain chooses every learner's move in all of them in one call."""
+    tier, senses = job["tier"], job.get("senses", "real")
+    policy = TrainPolicy(tier, senses, job.get("layout"))
+    gen, critic = policy.gen, Critic(policy.shape[0])
+    policy.load_state_dict(job["policy"])
+    critic.load_state_dict(job["critic"])
+    random.seed(job["seed"])
+    torch.manual_seed(job["seed"])
+    pool = _league(job.get("league") or [])
+    eps = [_Episode(job, _env_for(k), spec, pool, gen) for k, spec in enumerate(job["specs"])]
+    for step in range(job["max_steps"]):
+        racing = [e for e in eps if e.begin_step()]
+        if not racing:
+            break
+        who = [(e, i) for e in racing for i in e.mine]
+        rows = [None] * len(racing)
+        if who:
+            obs = _obs_rows([e.states[i] for e, i in who], gen)
             with torch.no_grad():
                 a, lp = policy.sample(obs)
                 v = critic(obs)
-            for k, i in enumerate(mine):
-                actions[i] = policy.env_action(int(a[k]))   # (the car's action; the trajectory keeps the heads' choices)
-                t = traj[i]
-                t["obs"].append(obs[k].tolist()); t["act"].append(int(a[k])); t["logp"].append(float(lp[k])); t["val"].append(float(v[k]))
-            nxt = _ENV.step_world(actions)
-            for i in range(n):
-                for j in nxt[i].get("touched", []):
-                    if 0 <= j < n:
-                        last_touch[i][j] = last_touch[j][i] = step
-            for i in mine:
-                left = job["max_steps"] - step - 1
-                traj[i]["rew"].append(reward_for(states[i], nxt[i], rw, left, gamma))
-                if job.get("contact_blame") and nxt[i].get("contacts"):   # the car that caused a touch pays more for it
-                    k = max([contact_blame(states[i], states[j]) for j in nxt[i].get("touched", []) if 0 <= j < n and j != i] or [1.0])
-                    traj[i]["rew"][-1] += (k - 1) * rw["contact"] * nxt[i]["contacts"]
-                # places gained and lost on nearby cars that are still racing; a pass only counts if it was clean
-                if rw.get("overtake") and not nxt[i]["dead"]:
-                    for j in range(n):
-                        if j == i or states[j]["dead"] or states[j]["finished"] or nxt[j]["dead"]:
-                            continue
-                        before = states[i]["distance"] - states[j]["distance"]
-                        after = nxt[i]["distance"] - nxt[j]["distance"]
-                        if abs(after) > PASS_NEAR_PX or (before > 0) == (after > 0) or before == 0:
-                            continue
-                        if after > 0 and step - last_touch[i][j] > PASS_CLEAN_STEPS:
-                            traj[i]["rew"][-1] += rw["overtake"]
-                            passes += i not in slow
-                        elif after < 0:   # losing a place (its own setting; by default the same as a pass is worth)
-                            traj[i]["rew"][-1] += rw.get("lose_place", -rw["overtake"])
-                            lost += i not in slow
-                a_i = int(actions[i])   # the steering part of the action (proportional: its level, -1..1)
-                d = ((a_i - PROP_BASE) % PROP_STEER - (PROP_STEER - 1) // 2) / ((PROP_STEER - 1) // 2) if a_i >= PROP_BASE else a_i % 3 - 1
-                if last_dir[i] is not None:
-                    traj[i]["rew"][-1] += job["rewards"]["steer_flip"] * abs(d - last_dir[i]) / 2
-                last_dir[i] = d
-                if i not in slow:
-                    contacts += nxt[i].get("contacts", 0)
-                    damage += nxt[i].get("damage", 0)
-                    walls += nxt[i].get("hits", 0)
-                s = nxt[i]
-                traces[i].append(pose(s, actions[i]))
-            states = nxt
-        for i, s in enumerate(states):   # cut off by the step cap: worth what the critic says
-            if traj[i]["obs"] and not (s["dead"] or s["finished"]):
-                with torch.no_grad():
-                    traj[i]["last_val"] = float(critic(state_to_obs(s, gen).unsqueeze(0))[0])
-        _write_traces(job, spec, traces)
-        out += [t for i, t in enumerate(traj) if t["obs"] and i not in slow]
-    return {"traj": out, "contacts": contacts, "damage": damage, "walls": walls, "passes": passes, "lost": lost}
+            obs_l, a_l, lp_l, v_l = obs.tolist(), a.tolist(), lp.tolist(), v.tolist()
+            k = 0
+            for r, e in enumerate(racing):
+                m = len(e.mine)
+                rows[r] = ([(x, policy.env_action(x)) for x in a_l[k:k + m]], lp_l[k:k + m], v_l[k:k + m], obs_l[k:k + m])
+                k += m
+        for r, e in enumerate(racing):
+            e.end_step(job, step, *(rows[r] or ([], [], [], [])))
+    out, totals = [], {"contacts": 0, "damage": 0.0, "walls": 0, "passes": 0, "lost": 0}
+    for e in eps:
+        last = [(i, s) for i, s in enumerate(e.states) if e.traj[i]["obs"] and not (s["dead"] or s["finished"])]
+        if last:   # cut off by the step cap: worth what the critic says
+            with torch.no_grad():
+                vals = critic(_obs_rows([s for _, s in last], gen)).tolist()
+            for (i, _), val in zip(last, vals):
+                e.traj[i]["last_val"] = val
+        _write_traces(job, e.spec, e.traces)
+        out += [t for i, t in enumerate(e.traj) if t["obs"] and i not in e.slow]
+        for k in totals:
+            totals[k] += getattr(e, k)
+    return {"traj": out, **totals}
 
 
 _LEAGUE: dict = {}   # (each worker: league brains, loaded once)
@@ -791,8 +856,9 @@ def main() -> None:
     ap.add_argument("--resume", default=None, help="start from an existing brain: a .json, or a .pth (PyTorch 2.6 or newer)")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--headed", action="store_true", help="show the evaluation browser")
-    ap.add_argument("--engine", choices=["python", "browser"], default=ENGINE,
-                    help="where practice runs: the Python race engine (default, faster) or the browser game")
+    ap.add_argument("--engine", choices=["python", "rust", "browser"], default=ENGINE if ENGINE in ("python", "rust", "browser") else "python",
+                    help="where practice runs: the Python race engine (default), the Rust one (optional, faster: "
+                         "pip install neuroprix-engine; used only if it matches this Python engine exactly), or the browser game")
     ap.add_argument("--progress-json", action="store_true",
                     help="print one JSON event per line instead of text (used by the training server)")
     ap.add_argument("--session", default=None,
@@ -814,6 +880,14 @@ def main() -> None:
     # One thread for the learner too: the brain is tiny, and spreading its maths over threads costs more than it saves
     # (a learning step took 119 ms on 1 thread, 149 ms on 4). The game workers already use one each.
     torch.set_num_threads(1)
+    if args.engine == "rust" and not args.headed:   # (asked for: used only if it's exactly the Python engine)
+        ok, why = rust_ready()
+        if not ok:
+            args.engine = "python"
+        text = f"engine: Rust, {why}" if ok else f"engine: Python (the Rust engine isn't used: {why})"
+        say(text, event="note", message=text)
+    elif args.engine == "python":
+        say("engine: Python", event="note", message="engine: Python")
     random.seed(args.seed)
     torch.manual_seed(args.seed)
     cars = max(1, min(10, args.traffic))
@@ -944,7 +1018,9 @@ def main() -> None:
         event="start", name=name, tracks=label, updates=args.updates, batch=args.batch, eval_spec=eval_specs[0],
         traffic=cars, learner="ppo", workers=workers, tier=tier)
     def new_pool():
-        return mp.get_context("spawn").Pool(workers, initializer=_worker_init, initargs=(args.engine,))
+        # one process per worker, and job w of every update always goes to worker w: a worker keeps its own pool of
+        # built circuits (SimEnv.pool_seed), so training stays repeatable only if the same jobs always meet the same pool
+        return [mp.get_context("spawn").Pool(1, initializer=_worker_init, initargs=(args.engine,)) for _ in range(workers)]
 
     def gather(todo):
         """Collect experience from the game workers. A worker can die (a browser crash, a broken pipe) or hang;
@@ -952,11 +1028,14 @@ def main() -> None:
         nonlocal pool
         for attempt in range(3):
             try:
-                return pool.map_async(collect, todo).get(timeout=args.worker_timeout)
+                end = time.time() + args.worker_timeout
+                waits = [w.apply_async(collect, (job,)) for w, job in zip(pool, todo)]
+                return [r.get(timeout=max(1.0, end - time.time())) for r in waits]
             except Exception as e:   # noqa: BLE001 - any worker failure: restart them all and retry
                 say(f"  a game worker failed ({type(e).__name__}: {str(e)[:120]}); restarting the workers",
                     event="note", message=f"game workers restarted after {type(e).__name__}")
-                pool.terminate()
+                for w in pool:
+                    w.terminate()
                 pool = new_pool()
         raise RuntimeError("the game workers kept failing; stopping this session")
 
@@ -996,7 +1075,8 @@ def main() -> None:
             if update > 1 and speed_cap(update) >= 1 > speed_cap(update - 1):
                 stage("Learning to race: now practising at full speed")
             # a new random circuit every episode for Surprise tracks; with gyms too, about half of each
-            eps = [{"seed": random.randrange(1_000_000)} if args.random_tracks and (not specs or random.random() < 0.5)
+            # (a random circuit comes from the worker's pool of built ones: SimEnv.pool_seed)
+            eps = [{"seed": random.randrange(1_000_000), "pool": True} if args.random_tracks and (not specs or random.random() < 0.5)
                    else either_way(random.choice(specs), both_ways) for _ in range(args.batch)]
             sd_p = {k: v.clone() for k, v in policy.state_dict().items()}
             sd_c = {k: v.clone() for k, v in critic.state_dict().items()}
@@ -1071,7 +1151,8 @@ def main() -> None:
                 event="holdout", progress=round(prog, 4), results=res)
         say("", event="done")
     finally:
-        pool.terminate()
+        for w in pool:
+            w.terminate()
         env.close()
 
 

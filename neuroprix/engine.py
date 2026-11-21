@@ -625,16 +625,23 @@ def world_size(spec: dict) -> tuple:
     return int(max(300, min(8000, float(size[0])))), int(max(300, min(8000, float(size[1]))))
 
 
-def build_track(spec: dict) -> Track:
+def read_spec(spec: dict) -> tuple:
+    """A track spec as build_track reads it: world size, control points, width, grip, laps, rocks, oil slicks, and a
+    height and bank per control point (the optional Rust engine reads specs with this too)."""
     W, H = world_size(spec)
     control = [[max(0.0, min(W, float(p[0]))), max(0.0, min(H, float(p[1])))] for p in spec["control"]]
     width = max(30.0, min(160.0, float(spec.get("width") or 80)))
     grip = max(0.3, min(2.0, float(spec.get("grip") or 1)))
     laps = max(1, min(LAPS_MAX, int(round(float(spec.get("laps") or 2)))))
-    pts = smooth_closed(control)
-    S, L = cumulative(pts)
     rocks = [o for o in spec.get("obstacles", []) if o.get("type") != "oil"]
     oils = [o for o in spec.get("obstacles", []) if o.get("type") == "oil"]
+    return W, H, control, width, grip, laps, rocks, oils, spec_values(spec, "elev", ELEV_MAX), spec_values(spec, "bank", BANK_MAX)
+
+
+def build_track(spec: dict) -> Track:
+    W, H, control, width, grip, laps, rocks, oils, elev, bank = read_spec(spec)
+    pts = smooth_closed(control)
+    S, L = cumulative(pts)
     # Drivable = pixel centre within width/2 of the centreline (the browser strokes it with round
     # joins and caps), minus the rocks. Only the pixels near each segment are checked.
     half = width / 2
@@ -664,7 +671,6 @@ def build_track(spec: dict) -> Track:
         mask[y0:y1, x0:x1] &= (gx - rx) ** 2 + (gy - ry) ** 2 > rr * rr
     start = (pts[0][0], pts[0][1], math.atan2(pts[1][1] - pts[0][1], pts[1][0] - pts[0][0]))
     T = Track(spec=spec, pts=pts, S=S, L=L, width=width, grip=grip, laps=laps, rocks=rocks, oils=oils, mask=mask, start=start, W=W, H=H)
-    elev, bank = spec_values(spec, "elev", ELEV_MAX), spec_values(spec, "bank", BANK_MAX)
     if any(elev) or any(bank):   # N1: the road's heights and banks
         T.hilly, T.z = True, smooth_values(control, elev)
         T.grade, T.vcurv, T.bank = road_shape(pts, S, L, T.z, smooth_values(control, bank))

@@ -180,7 +180,7 @@ race result. A better-trained brain just drives better.
 ## The runner
 
 ```
-neuroprix-runner [--server URL] [--name NAME] [--workers N] [--trainer COMMAND] [--relink] [--version]
+neuroprix-runner [--server URL] [--name NAME] [--workers N] [--engine python|rust] [--trainer COMMAND] [--relink] [--version]
 ```
 
 | Option | What it does | Default |
@@ -188,6 +188,7 @@ neuroprix-runner [--server URL] [--name NAME] [--workers N] [--trainer COMMAND] 
 | `--server URL` | The NeuroPrix server: the site's address followed by `/api` (`https://neuroprix.com/api`). Remembered after the first time, so later you can leave it out. | The remembered one |
 | `--name NAME` | What this computer is called in the Train page's **Trains on** list. Only used when linking. | This computer's name |
 | `--workers N` | How many practice games to run at the same time. More is faster but uses more of your computer. | CPU cores minus 2 (at most 12) |
+| `--engine python\|rust` | The race engine NeuroPrix's trainer practises on: the Python one, or the optional Rust one (faster; `pip install "neuroprix[fast]"`), used only if it matches the Python engine exactly ([details](engine.md#the-optional-rust-engine-faster-training)). | `python` |
 | `--trainer COMMAND` | Train with your own trainer instead of NeuroPrix's, e.g. `--trainer "python my_trainer.py"`. See [Write your own trainer](#write-your-own-trainer). | NeuroPrix's PPO trainer |
 | `--relink` | Forget the current link and show a new code (for example, to link this computer to a different account). | |
 | `--allow-http` | Allow a plain `http://` server that isn't this computer. Unsafe: the runner's token travels unencrypted. Only for a server on your own network. | off |
@@ -255,6 +256,7 @@ for scripts, services and containers:
 | `NEUROPRIX_TRAINER` | `--trainer` | `python /work/my_trainer.py` |
 | `NEUROPRIX_RUNNER_CONFIG` | Where the link is kept | `/data/runner.json` |
 | `NEUROPRIX_TRAIN_WORKERS` | `neuroprix-train --workers` (when training without the runner) | `4` |
+| `NEUROPRIX_TRAIN_ENGINE` | `--engine` (`python` or `rust`) | `rust` |
 
 ### The link file
 
@@ -281,6 +283,9 @@ two by default, leaving some for you. Use `--workers` to change that:
 
 - Leave your computer usable while it trains: `--workers 2` or `--workers 4`.
 - A machine that does nothing else: `--workers` equal to its number of cores.
+- Optional: the Rust engine, `pip install "neuroprix[fast]"` and `neuroprix-runner --engine rust`. The same races,
+  computed several times faster; used only if it matches your Python engine exactly
+  ([docs/engine.md](engine.md#the-optional-rust-engine-faster-training)).
 
 As a rough guide: in our tests a Standard N4 session (150 updates) took about 4 minutes with only 2 workers on a
 busy Apple Silicon Mac; more workers make it faster. A Long session (400) takes about three times as long, and N3, N2
@@ -368,6 +373,7 @@ This writes the best brain to `experiment.json` (and `experiment.pth`, the same 
 | `--resume brain.json` | Start from an existing brain of the same class (a `.json`, or a `.pth` with PyTorch 2.6 or newer) | a new brain |
 | `--layout combined\|two_head\|three_head` (each also `_prop`: by degrees) | The brain's [action layout](brain-format.md#action-layouts). A resumed brain can move forward (combined → two_head → three_head, keeping on/off or by degrees) and keeps what it learned | a resumed brain's own; a new N2 or N1 brain `three_head_prop`, N3 `two_head_prop`; N4 `combined` |
 | `--workers N` | Games in parallel | cores minus 2 (at most 8) |
+| `--engine python\|rust\|browser` | The race engine practice runs on: Python, the optional Rust one (same results, faster; [details](engine.md#the-optional-rust-engine-faster-training)), or the browser game | `python` |
 | `--progress-json` | Print progress as JSON lines (as the runner sees it) | text |
 | reward weights | `--progress`, `--fast`, `--damage`, `--crash`, `--corner`, `--overtake`, `--lose-place`, `--wall`, … | NeuroPrix's defaults |
 | learning | `--lr`, `--entropy`, `--gamma`, `--lam`, `--clip`, `--epochs`, `--minibatch` | NeuroPrix's defaults |

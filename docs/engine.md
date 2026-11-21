@@ -39,3 +39,35 @@ steering-only model.
 `neuroprix.engine`. Real driving is sensitive to small differences, and so is this: two runs that differ in the last
 digit of a number drift apart over a long race with slides and collisions. Each engine is exactly repeatable on its
 own.
+
+## The optional Rust engine (faster training)
+
+`neuroprix.engine` is pure Python, and it stays the engine to read and change: the SDK needs nothing else, and
+`pip install neuroprix` installs no compiled code. If you'd like training to go faster and don't plan to change the
+physics, there's an optional second engine: **neuroprix-engine**, the same engine ported to Rust (in this repository's
+[neuroprix-engine](../neuroprix-engine) folder). It gives exactly the same numbers as `neuroprix.engine`, to the last
+digit, step by step, so a driver trained on it is the same driver: with the same settings and seed, the two engines
+train identical brains.
+
+```bash
+pip install "neuroprix[fast]"                 # or: pip install neuroprix-engine
+neuroprix-runner --engine rust                # sessions from the Train page
+neuroprix-train --engine rust --tier n1 ...   # or training on your own
+```
+
+`NEUROPRIX_TRAIN_ENGINE=rust` does the same for scripts and services. What it changes: the practice games run several
+times faster, so a whole training update takes well under half the time (the learning step itself doesn't change).
+
+**When the trainer uses it.** The Rust engine is never used on its own; it's used only when you ask for it, and then
+only if all of these hold. Otherwise the trainer says why and trains on the Python engine:
+
+1. neuroprix-engine is installed, and made for this engine version (its `ENGINE_VERSION` is `neuroprix.ENGINE_VERSION`);
+2. `neuroprix/engine.py` is the one released with your neuroprix (its SHA-256 is `neuroprix.ENGINE_SHA256`). If you've
+   changed the physics, your engine is what you train on: the trainer never swaps your engine for the Rust one;
+3. a short check at the start, both engines side by side on two circuits, finds them exactly the same.
+
+The trainer's first lines say which engine it's using (`engine: Rust, ...` or `engine: Python ...`).
+
+**Changing the physics.** Change `neuroprix/engine.py`, as before: the Rust engine steps aside by rule 2. For the
+engine itself, every change goes into the Python engine first, then into the Rust one, and a new neuroprix-engine is
+released with the new `ENGINE_VERSION`; `neuroprix-engine/README.md` says how it's checked.
