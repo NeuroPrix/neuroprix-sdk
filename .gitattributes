@@ -1,0 +1,4 @@
+# LF line ends everywhere, Windows checkouts included (engine.py is checked by its SHA-256, and the engines must match)
+* text=auto eol=lf
+*.png binary
+*.jpg binary

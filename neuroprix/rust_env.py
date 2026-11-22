@@ -188,7 +188,7 @@ def rust_ready() -> tuple[bool, str]:
         return False, (f"{label} is for engine {ne.ENGINE_VERSION} and this Python engine is {sim.ENGINE_VERSION} "
                        "(install the neuroprix-rs made for it)")
     if RELEASED_SHA256:
-        mine = hashlib.sha256(Path(sim.__file__).read_bytes()).hexdigest()
+        mine = hashlib.sha256(Path(sim.__file__).read_bytes().replace(b"\r\n", b"\n")).hexdigest()   # (as released: a Windows checkout's CRLF line ends are the same file)
         if mine != RELEASED_SHA256:
             return False, (f"{Path(sim.__file__).name} isn't the released one (changed by you?): your Python engine "
                            "is used, so your physics are what you train on")
