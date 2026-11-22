@@ -45,7 +45,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "neuroprix-engine"
+name = "neuroprix-rs"
 version = "0.1.0"
 dependencies = [
  "pyo3",

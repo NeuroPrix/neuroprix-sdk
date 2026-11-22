@@ -238,7 +238,7 @@ class Critic(nn.Module):
 # ---------- experience collection (runs in worker processes) ----------
 _ENV = None
 # Where practice and checks run: "python" (backend/sim.py through agent/simenv.py: the engine races run in, about
-# twice as fast and much lighter than a browser per worker), "rust" (the optional neuroprix-engine package: the same
+# twice as fast and much lighter than a browser per worker), "rust" (the optional neuroprix-rs package: the same
 # engine ported to Rust, exactly the same results, several times faster; only when asked, and only if rust_ready says
 # so: agent/rustenv.py) or "browser" (the game page in headless Chromium). All give the trainer the same states.
 ENGINE = os.environ.get("NEUROPRIX_TRAIN_ENGINE", "python")
@@ -858,7 +858,7 @@ def main() -> None:
     ap.add_argument("--headed", action="store_true", help="show the evaluation browser")
     ap.add_argument("--engine", choices=["python", "rust", "browser"], default=ENGINE if ENGINE in ("python", "rust", "browser") else "python",
                     help="where practice runs: the Python race engine (default), the Rust one (optional, faster: "
-                         "pip install neuroprix-engine; used only if it matches this Python engine exactly), or the browser game")
+                         "pip install neuroprix-rs; used only if it matches this Python engine exactly), or the browser game")
     ap.add_argument("--progress-json", action="store_true",
                     help="print one JSON event per line instead of text (used by the training server)")
     ap.add_argument("--session", default=None,

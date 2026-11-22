@@ -1,17 +1,17 @@
-# The optional Rust engine (neuroprix-engine/): ready-built wheels for Linux, macOS and Windows (one per platform: they
+# The optional Rust engine (neuroprix-rs/): ready-built wheels for Linux, macOS and Windows (one per platform: they
 # work on every Python from 3.10), each tested against the Python engine step by step on Pythons 3.10 to 3.14 (math.hypot
-# and sum() changed in 3.12, so both sides of that are tested). A tag engine-v0.1.0 publishes them to PyPI after the
-# tests pass. One-time setup on pypi.org: add this repository as a "trusted publisher" for the neuroprix-engine project
-# (workflow engine-wheels.yml, environment "pypi-engine"). No PyPI password or token is stored in the repository.
+# and sum() changed in 3.12, so both sides of that are tested). A tag rs-v0.1.0 publishes them to PyPI after the
+# tests pass. One-time setup on pypi.org: add this repository as a "trusted publisher" for the neuroprix-rs project
+# (workflow rs-wheels.yml, environment "pypi-rs"). No PyPI password or token is stored in the repository.
 name: Rust engine
 
 on:
   push:
     branches: ["**"]
-    tags: ["engine-v*"]   # (path filters don't apply to tags: a tag always runs)
-    paths: ["neuroprix-engine/**", "neuroprix/**", "tests/**", ".github/workflows/engine-wheels.yml"]
+    tags: ["rs-v*"]   # (path filters don't apply to tags: a tag always runs)
+    paths: ["neuroprix-rs/**", "neuroprix/**", "tests/**", ".github/workflows/rs-wheels.yml"]
   pull_request:
-    paths: ["neuroprix-engine/**", "neuroprix/**", "tests/**", ".github/workflows/engine-wheels.yml"]
+    paths: ["neuroprix-rs/**", "neuroprix/**", "tests/**", ".github/workflows/rs-wheels.yml"]
   workflow_dispatch:
 
 permissions:
@@ -41,7 +41,7 @@ jobs:
       - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: ${{ matrix.target }}
-          args: --release --out dist --manifest-path neuroprix-engine/Cargo.toml
+          args: --release --out dist --manifest-path neuroprix-rs/Cargo.toml
           manylinux: auto
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -54,10 +54,17 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+      - name: A tag matches the package version
+        if: startsWith(github.ref, 'refs/tags/rs-v')
+        run: |
+          py=$(python3 -c "import tomllib; print(tomllib.load(open('neuroprix-rs/pyproject.toml','rb'))['project']['version'])")
+          rs=$(python3 -c "import tomllib; print(tomllib.load(open('neuroprix-rs/Cargo.toml','rb'))['package']['version'])")
+          test "rs-v$py" = "${GITHUB_REF_NAME}" || { echo "tag ${GITHUB_REF_NAME} but neuroprix-rs/pyproject.toml says $py"; exit 1; }
+          test "$py" = "$rs" || { echo "pyproject.toml says $py but Cargo.toml says $rs"; exit 1; }
       - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           command: sdist
-          args: --out dist --manifest-path neuroprix-engine/Cargo.toml
+          args: --out dist --manifest-path neuroprix-rs/Cargo.toml
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: sdist
@@ -104,10 +111,10 @@ jobs:
         run: python -m pytest -q tests/test_trainer.py tests/test_runner.py
 
   publish:
-    if: startsWith(github.ref, 'refs/tags/engine-v')
+    if: startsWith(github.ref, 'refs/tags/rs-v')
     needs: [wheels, sdist, test]
     runs-on: ubuntu-latest
-    environment: pypi-engine
+    environment: pypi-rs
     permissions:
       id-token: write
     steps:

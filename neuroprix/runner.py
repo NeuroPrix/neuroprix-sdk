@@ -421,7 +421,7 @@ def main() -> None:
                          "It's run with --session <file>: see docs/trainer-contract.md")
     ap.add_argument("--engine", choices=["python", "rust"], default="rust" if os.environ.get("NEUROPRIX_TRAIN_ENGINE") == "rust" else "python",
                     help="the race engine NeuroPrix's trainer practises on: python (default) or rust (optional and faster: "
-                         "pip install neuroprix-engine; used only if it matches the Python engine exactly)")
+                         "pip install neuroprix-rs; used only if it matches the Python engine exactly)")
     ap.add_argument("--relink", action="store_true", help="forget the current link and show a new code")
     ap.add_argument("--allow-http", action="store_true",
                     help="allow a plain http:// server that isn't this computer (unsafe: the runner's token travels "

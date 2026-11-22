@@ -1,4 +1,4 @@
-//! neuroprix_engine: NeuroPrix's race engine in Rust, for faster training with the neuroprix SDK.
+//! neuroprix_rs: NeuroPrix's race engine in Rust, for faster training with the neuroprix SDK.
 //!
 //! It is a port of neuroprix/engine.py (the reference engine, which stays the readable one to tweak) and gives the
 //! same numbers to the last bit, step by step. neuroprix uses it only when asked (`--engine rust`), when its
@@ -105,7 +105,7 @@ fn generate_track_spec<'py>(
 
 /// A built track (the engine's build_track). The spec is read in Python first, by the engine's own code
 /// (neuroprix.rust_env), so only plain numbers cross over.
-#[pyclass(frozen, module = "neuroprix_engine")]
+#[pyclass(frozen, module = "neuroprix_rs")]
 struct RustTrack {
     inner: Arc<Track>,
 }
@@ -208,7 +208,7 @@ impl RustTrack {
 }
 
 /// A field of training cars on one track, stepped like neuroprix.env.SimEnv steps the Python engine.
-#[pyclass(module = "neuroprix_engine", unsendable)]
+#[pyclass(module = "neuroprix_rs", unsendable)]
 struct RustWorld {
     w: World,
 }
@@ -434,7 +434,7 @@ impl RustWorld {
 }
 
 #[pymodule]
-fn neuroprix_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn neuroprix_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("ENGINE_VERSION", ENGINE_VERSION)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     m.add_function(wrap_pyfunction!(set_python, m)?)?;

@@ -29,7 +29,7 @@ classifiers = [
 [project.optional-dependencies]
 test = ["pytest>=7"]
 # the optional Rust engine: the same engine, faster training (docs/engine.md); used only with --engine rust
-fast = ["neuroprix-engine>=0.1,<0.2"]
+fast = ["neuroprix-rs>=0.1,<0.2"]
 
 [project.urls]
 Homepage = "https://neuroprix.com"

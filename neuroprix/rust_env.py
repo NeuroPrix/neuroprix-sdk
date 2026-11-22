@@ -1,17 +1,17 @@
-"""Training on the optional Rust race engine (the neuroprix-engine package), several times faster than the Python one.
+"""Training on the optional Rust race engine (the neuroprix-rs package), several times faster than the Python one.
 
 The Python engine (backend/sim.py) is the reference: the one to read and tweak. The Rust engine is a port of it that
 gives exactly the same numbers, step by step, and RustEnv drives it with the same interface and the same states as
-SimEnv (agent/simenv.py). Nothing here is needed to train: without neuroprix-engine, training runs on the Python engine.
+SimEnv (agent/simenv.py). Nothing here is needed to train: without neuroprix-rs, training runs on the Python engine.
 
 When the Rust engine is used (rust_ready), which is a safe rule for players who change the Python engine:
   1. only when asked: the trainer's --engine rust, or NEUROPRIX_TRAIN_ENGINE=rust (never on its own);
-  2. only if neuroprix-engine is installed and made for this engine version (ENGINE_VERSION);
+  2. only if neuroprix-rs is installed and made for this engine version (ENGINE_VERSION);
   3. only if the Python engine is the one released with this package, unchanged (its SHA-256): a player's own physics
      are never swapped for the Rust engine's;
   4. only if a short lockstep check, the two engines side by side on two circuits, finds them exactly the same.
 Otherwise training says why and runs on the Python engine. Physics changes go into the Python engine first, then into
-the Rust one (and a new neuroprix-engine release).
+the Rust one (and a new neuroprix-rs release).
 """
 from __future__ import annotations
 
@@ -28,9 +28,9 @@ BOX = ((sim.CAR_L / 2, sim.CAR_W / 2), (sim.CAR_L / 2, -sim.CAR_W / 2), (-sim.CA
 
 
 def _module():
-    import neuroprix_engine   # (optional: pip install neuroprix-engine)
-    neuroprix_engine.set_python(*sys.version_info[:2])   # (math.hypot and sum() changed in Python 3.12: it does as this one)
-    return neuroprix_engine
+    import neuroprix_rs   # (optional: pip install neuroprix-rs)
+    neuroprix_rs.set_python(*sys.version_info[:2])   # (math.hypot and sum() changed in Python 3.12: it does as this one)
+    return neuroprix_rs
 
 
 class _Track:
@@ -180,13 +180,13 @@ def rust_ready() -> tuple[bool, str]:
     try:
         ne = _module()
     except ImportError:
-        return False, "neuroprix-engine isn't installed (pip install neuroprix-engine)"
+        return False, "neuroprix-rs isn't installed (pip install neuroprix-rs)"
     except Exception as e:   # noqa: BLE001 - a broken install: say what it was
-        return False, f"neuroprix-engine didn't load ({type(e).__name__}: {e})"
-    label = f"neuroprix-engine {getattr(ne, '__version__', '?')}"
+        return False, f"neuroprix-rs didn't load ({type(e).__name__}: {e})"
+    label = f"neuroprix-rs {getattr(ne, '__version__', '?')}"
     if ne.ENGINE_VERSION != sim.ENGINE_VERSION:
         return False, (f"{label} is for engine {ne.ENGINE_VERSION} and this Python engine is {sim.ENGINE_VERSION} "
-                       "(install the neuroprix-engine made for it)")
+                       "(install the neuroprix-rs made for it)")
     if RELEASED_SHA256:
         mine = hashlib.sha256(Path(sim.__file__).read_bytes()).hexdigest()
         if mine != RELEASED_SHA256:

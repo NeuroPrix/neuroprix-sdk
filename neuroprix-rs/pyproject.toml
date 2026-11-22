@@ -3,7 +3,7 @@ requires = ["maturin>=1.7,<2"]
 build-backend = "maturin"
 
 [project]
-name = "neuroprix-engine"
+name = "neuroprix-rs"
 version = "0.1.0"
 description = "Optional: NeuroPrix's race engine in Rust, for faster training with the neuroprix SDK. Same results as neuroprix.engine, step by step."
 readme = "README.md"
@@ -21,8 +21,8 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://neuroprix.com"
-Source = "https://github.com/NeuroPrix/neuroprix-sdk/tree/main/neuroprix-engine"
+Source = "https://github.com/NeuroPrix/neuroprix-sdk/tree/main/neuroprix-rs"
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
-module-name = "neuroprix_engine"
+module-name = "neuroprix_rs"

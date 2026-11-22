@@ -1,4 +1,4 @@
-# neuroprix-engine
+# neuroprix-rs
 
 **Optional.** NeuroPrix's race engine ported to Rust, for faster training with the
 [neuroprix](https://github.com/NeuroPrix/neuroprix-sdk) SDK. It gives exactly the same results as the SDK's Python
@@ -8,7 +8,7 @@ The SDK doesn't need it. `neuroprix/engine.py` stays the readable reference engi
 this package is for players who want speed and train on the official physics.
 
 ```bash
-pip install "neuroprix[fast]"        # or: pip install neuroprix-engine
+pip install "neuroprix[fast]"        # or: pip install neuroprix-rs
 neuroprix-runner --engine rust       # or: neuroprix-train --engine rust ...
 ```
 
@@ -50,10 +50,10 @@ You need [Rust](https://rustup.rs) and [maturin](https://www.maturin.rs):
 
 ```bash
 pip install maturin
-pip install ./neuroprix-engine          # from the SDK repository's folder
+pip install ./neuroprix-rs          # from the SDK repository's folder
 ```
 
-Ready-built wheels for macOS, Linux and Windows are built by the SDK repository's `engine-wheels` workflow.
+Ready-built wheels for macOS, Linux and Windows are built by the SDK repository's `rs-wheels` workflow.
 
 ## License
 

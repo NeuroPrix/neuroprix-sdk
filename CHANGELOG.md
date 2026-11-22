@@ -22,7 +22,7 @@ so you train on the same physics the races use.
   vary it (`neuroprix.env.SimEnv.setup_world(..., race_grip=True)`; off by default).
 - The coach's corner-speed marks (`corner_limits`) use 88% of the grip, what the car really holds steadily.
 - **An optional Rust engine for faster training** ([docs/engine.md](docs/engine.md#the-optional-rust-engine-faster-training)):
-  neuroprix-engine, its own package (`pip install "neuroprix[fast]"`), is the same engine ported to Rust and gives
+  neuroprix-rs, its own package (`pip install "neuroprix[fast]"`), is the same engine ported to Rust and gives
   exactly the same results step by step, so the same settings and seed train the identical brain. Practice runs
   several times faster. It's used only when asked (`neuroprix-runner --engine rust`, `neuroprix-train --engine rust`
   or `NEUROPRIX_TRAIN_ENGINE=rust`), only if it was made for this engine version, never instead of an `engine.py`

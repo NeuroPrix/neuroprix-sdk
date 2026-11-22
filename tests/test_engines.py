@@ -1,6 +1,6 @@
-"""The race engines: the Python engine is the default and needs nothing else; the optional Rust one (neuroprix-engine)
+"""The race engines: the Python engine is the default and needs nothing else; the optional Rust one (neuroprix-rs)
 is used only when asked, only when it matches, never instead of a changed engine.py, and then gives exactly the
-Python engine's results. The Rust tests are skipped when neuroprix-engine isn't installed."""
+Python engine's results. The Rust tests are skipped when neuroprix-rs isn't installed."""
 import json
 import random
 import subprocess
@@ -14,11 +14,11 @@ from neuroprix.env import POOL_SIZE, SimEnv
 from conftest import write_session
 
 try:
-    import neuroprix_engine  # noqa: F401
+    import neuroprix_rs  # noqa: F401
     HAVE_RUST = True
 except ImportError:
     HAVE_RUST = False
-needs_rust = pytest.mark.skipif(not HAVE_RUST, reason="neuroprix-engine isn't installed")
+needs_rust = pytest.mark.skipif(not HAVE_RUST, reason="neuroprix-rs isn't installed")
 
 
 def notes(cmd, session):
@@ -28,7 +28,7 @@ def notes(cmd, session):
 
 
 def test_the_sdk_never_loads_the_rust_engine_by_itself():
-    code = "import sys, neuroprix.train, neuroprix.runner, neuroprix.rust_env; print('neuroprix_engine' in sys.modules)"
+    code = "import sys, neuroprix.train, neuroprix.runner, neuroprix.rust_env; print('neuroprix_rs' in sys.modules)"
     r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120)
     assert r.stdout.strip() == "False", r.stderr
 
@@ -43,9 +43,9 @@ def test_asking_for_rust_says_which_engine_it_trains_on(tmp_path, monkeypatch):
     monkeypatch.setenv("NEUROPRIX_TRAIN_ENGINE", "rust")
     said = [n for n in notes([sys.executable, "-m", "neuroprix.train"], write_session(tmp_path, "n1")) if n.startswith("engine:")]
     if HAVE_RUST:
-        assert said and said[0].startswith("engine: Rust, neuroprix-engine"), said
+        assert said and said[0].startswith("engine: Rust, neuroprix-rs"), said
     else:
-        assert said and said[0].startswith("engine: Python (the Rust engine isn't used: neuroprix-engine isn't installed"), said
+        assert said and said[0].startswith("engine: Python (the Rust engine isn't used: neuroprix-rs isn't installed"), said
 
 
 @needs_rust
@@ -72,7 +72,7 @@ def test_rust_is_ready_for_the_released_engine():
 @pytest.mark.parametrize("seed", [1, 2, 3, 77, 5003, 9001, 424242])
 @pytest.mark.parametrize("cls", [None, "n1"])
 def test_rust_makes_the_same_circuits(seed, cls):
-    assert neuroprix_engine.generate_track_spec(seed, cls) == engine.generate_track_spec(seed, cls)
+    assert neuroprix_rs.generate_track_spec(seed, cls) == engine.generate_track_spec(seed, cls)
 
 
 GYM = {"name": "test gym", "width": 90, "grip": 1, "laps": 2,
