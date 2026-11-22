@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "neuroprix"
-version = "0.3.2"
+version = "0.3.3"
 description = "NeuroPrix SDK: train your NeuroPrix racing drivers on your own computer. The race engine, the default trainer and the runner."
 readme = "README.md"
 license = "Apache-2.0"
@@ -29,7 +29,7 @@ classifiers = [
 [project.optional-dependencies]
 test = ["pytest>=7"]
 # the optional Rust engine: the same engine, faster training (docs/engine.md); used only with --engine rust
-fast = ["neuroprix-rs>=0.1,<0.2"]
+fast = ["neuroprix-rs>=0.2,<0.3"]
 
 [project.urls]
 Homepage = "https://neuroprix.com"

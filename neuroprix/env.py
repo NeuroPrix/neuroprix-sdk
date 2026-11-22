@@ -127,7 +127,7 @@ class SimEnv:
     @staticmethod
     def _info(T, n: int) -> dict:
         return {"name": T.spec.get("name", ""), "length": round(T.L), "width": T.width, "laps": T.laps,
-                "obstacles": len(T.spec.get("obstacles", [])), "cars": n, "people": 0}
+                "cars": n, "people": 0}
 
     def _place(self, c, x: float, y: float, a: float) -> None:
         """Put a car at a pose and set its progress from there (as Car.reset does for the start line)."""

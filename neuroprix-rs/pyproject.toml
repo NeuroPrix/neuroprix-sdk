@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "neuroprix-rs"
-version = "0.1.0"
+version = "0.2.0"
 description = "Optional: NeuroPrix's race engine in Rust, for faster training with the neuroprix SDK. Same results as neuroprix.engine, step by step."
 readme = "README.md"
 license = "Apache-2.0"

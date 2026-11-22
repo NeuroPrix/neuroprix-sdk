@@ -41,7 +41,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-VERSION = "0.3.2"
+VERSION = "0.3.3"
 CONFIG = Path(os.environ.get("NEUROPRIX_RUNNER_CONFIG") or Path.home() / ".neuroprix" / "runner.json")
 SESSION_FORMAT = 1
 

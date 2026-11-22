@@ -12,11 +12,11 @@ mod world;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 use std::sync::Arc;
-use track::{Obstacle, Track};
+use track::Track;
 use world::{Car, World};
 
 /// The engine version this port matches (neuroprix.engine.ENGINE_VERSION).
-const ENGINE_VERSION: &str = "2026.11.9";
+const ENGINE_VERSION: &str = "2026.11.10";
 
 fn int_or_float(py: Python<'_>, v: f64) -> PyObject {
     // (the generator's numbers that the Python engine keeps as ints)
@@ -86,16 +86,6 @@ fn generate_track_spec<'py>(
     d.set_item("width", spec.width as i64)?;
     d.set_item("grip", spec.grip)?;
     d.set_item("laps", 2)?;
-    let obs = PyList::empty(py);
-    for o in &spec.obstacles {
-        let od = PyDict::new(py);
-        od.set_item("type", if o.oil { "oil" } else { "rock" })?;
-        od.set_item("x", o.x as i64)?;
-        od.set_item("y", o.y as i64)?;
-        od.set_item("r", o.r as i64)?;
-        obs.append(od)?;
-    }
-    d.set_item("obstacles", obs)?;
     if let (Some(e), Some(b)) = (&spec.elev, &spec.bank) {
         d.set_item("elev", e.clone())?;
         d.set_item("bank", b.clone())?;
@@ -121,8 +111,6 @@ impl RustTrack {
         width: f64,
         grip: f64,
         laps: i64,
-        rocks: Vec<(f64, f64, f64)>,
-        oils: Vec<(f64, f64, f64)>,
         elev: Vec<f64>,
         bank: Vec<f64>,
     ) -> PyResult<Self> {
@@ -131,11 +119,6 @@ impl RustTrack {
                 "a track needs 3 control points or more, and a height and bank each",
             ));
         }
-        let ob = |v: Vec<(f64, f64, f64)>, oil: bool| {
-            v.into_iter()
-                .map(|(x, y, r)| Obstacle { oil, x, y, r })
-                .collect()
-        };
         let t = Track::build(
             w,
             h,
@@ -143,8 +126,6 @@ impl RustTrack {
             width,
             grip,
             laps,
-            ob(rocks, false),
-            ob(oils, true),
             elev,
             bank,
         );

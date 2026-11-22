@@ -51,7 +51,7 @@ def test_default_trainer_on_a_gym(tmp_path):
     session = write_session(folder, "n4", settings={"updates": 1, "batch": 1, "eval_every": 1, "traffic": 1, "max_steps": 60})
     s = json.loads(session.read_text())
     s["tracks"] = [{"name": "Oval", "control": [[200, 200], [800, 200], [900, 450], [800, 700], [200, 700], [100, 450]],
-                    "width": 110, "grip": 1, "laps": 1, "obstacles": []}]
+                    "width": 110, "grip": 1, "laps": 1}]
     session.write_text(json.dumps(s))
     train([sys.executable, "-m", "neuroprix.train"], session)
     check_brain(folder / "brain.json", "n4")

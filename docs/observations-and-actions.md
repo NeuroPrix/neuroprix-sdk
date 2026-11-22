@@ -5,11 +5,11 @@ The car decides 15 times a second: each decision lasts 4 physics frames (60 fram
 ## Inputs, in order
 
 Every brain senses only what a real car or its driver could measure, plus which way the race goes (brain kinds 16–19:
-N4 46 inputs, N3 47, N2 49, N1 57; engine 2026.11.9). Nothing is read off the track map but the heading.
+N4 46 inputs, N3 47, N2 49, N1 57; engine 2026.11.10). Nothing is read off the track map but the heading.
 
 | # | Input | Classes | Meaning |
 |---|---|---|---|
-| 1–9 | Wall rays | all | Distance from the nose to the first point that isn't road (the track's edge or a rock) at −90°, −60°, −40°, −20°, 0°, +20°, +40°, +60°, +90° from the nose (left to right), ÷ 250 px. The 0° and ±20° rays are [beams the car's width](#the-forward-beams) |
+| 1–9 | Wall rays | all | Distance from the nose to the first point that isn't road (the track's edge) at −90°, −60°, −40°, −20°, 0°, +20°, +40°, +60°, +90° from the nose (left to right), ÷ 250 px. The 0° and ±20° rays are [beams the car's width](#the-forward-beams) |
 | 10–41 | Radar | all | 8 sectors all round the car, 4 numbers each: [the radar](#the-radar-8-sectors-all-round) below |
 | 42 | Speed | all | ÷ top speed (5 px a frame) |
 | 43 | Steering wheel | N3, N2, N1 | 0 = full left, 0.5 = straight, 1 = full right (the wheel turns at a limited rate) |
@@ -31,8 +31,8 @@ So N4 has the rays, the radar, speed, yaw rate, sideslip, health and the heading
 ## The forward beams
 
 The 0° and ±20° rays are as wide as the car (10 px): each is three parallel rays, from the middle of the nose and from
-5 px either side, and the shortest reading counts. A rock just off the nose's line, which a single ray would pass, shows
-up as the car closes on it. The others are single rays: across the road, a gap the width of a car doesn't matter.
+5 px either side, and the shortest reading counts. A corner of wall just off the nose's line, which a single ray would
+pass, shows up as the car closes on it. The others are single rays: across the road, a gap the width of a car doesn't matter.
 
 ## Sight lines (N1)
 
@@ -77,7 +77,7 @@ In that order (front, front-left, left, rear-left, rear, rear-right, right, fron
 | closing | 0.5 + how fast the gap is shrinking ÷ 10 px a frame: above 0.5 = getting closer, whether it's catching you or you're catching it | 0.5 |
 | sideways | 0.5 + its sideways speed relative to you ÷ 10 px a frame: above 0.5 = moving to your right | 0.5 |
 
-A wrecked car reads as a car standing still. Obstacles aren't on the radar (stones stop the wall rays).
+A wrecked car reads as a car standing still. There are no stones or oil slicks on any track (since engine 2026.11.10).
 
 ## Actions
 
@@ -102,7 +102,7 @@ fast it's going); in a dip it's pressed down (more grip). A corner banked into t
 off-camber one less; banking only counts in corners (it fades out as a bend straightens). Flat tracks drive exactly as
 they always have.
 
-Walls and stones cost health by how hard you hit them (a square-on hit at top speed wrecks the car); touching another
+Walls cost health by how hard you hit them (a square-on hit at top speed wrecks the car); touching another
 car costs both half their speed. The first 20% of damage is the body only and costs no speed; below 80% health top
 speed falls evenly to half at zero, until a pit stop. The N3, N2 and N1 cars handle like real ones
 ([the engine](engine.md#how-the-car-handles)): too fast for a corner and the car washes wide or spins. A wrecked car, one that makes no

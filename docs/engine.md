@@ -23,7 +23,7 @@ steering-only model.
 - **Two axles with tyres.** Each axle's sideways force comes from its slip angle, the angle between where its wheels
   point and where they move. It peaks at about 8 degrees, and a fully sliding tyre keeps 89% of its peak, as racing
   slicks do, so a slide can be caught. Each axle's grip is its share of the car's weight times the track's grip
-  (`LAT_GRIP`, with oil, the race day's grip and, on hills, the load over crests and dips).
+  (`LAT_GRIP`, with the race day's grip and, on hills, the load over crests and dips).
 - **Mass and weight transfer.** The centre of mass sits a little behind the middle (`CG_FRONT`), the body has yaw
   inertia, and braking moves load onto the front tyres and power onto the rear (`CG_H`).
 - **One grip for everything.** Each axle's braking or driving force and its sideways force share one friction circle.

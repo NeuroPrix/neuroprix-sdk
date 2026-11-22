@@ -5,7 +5,18 @@ version may need you to change your own trainer; minor and patch versions don't.
 (`neuroprix.ENGINE_VERSION`, e.g. `2026.11.2`), shown by `neuroprix-runner --version`; when it changes, update the SDK
 so you train on the same physics the races use.
 
-## 0.3.2 (unreleased)
+## 0.3.3
+
+- **No stones or oil slicks** (engine 2026.11.10): every track is clean. Circuits have no rocks or oil any more, gyms
+  have no `obstacles` (a spec that still has them races without them), and the oil's low grip is gone. A driver's rays
+  could only see a stone once it was in line of sight on the road, so a stone just past a corner, which a real driver
+  would see over the wall, was a surprise no brain could plan for. Every input stays the same (stones only ever showed
+  on the wall rays), so every brain still loads and drives as before; one trained with stones never meets one again.
+  Circuits keep their layouts. `read_spec` no longer returns rocks and oil, and `env.reset()`'s info has no
+  `obstacles` count.
+- **neuroprix-rs 0.2.0**, for engine 2026.11.10 (the `[fast]` extra now installs `neuroprix-rs>=0.2,<0.3`).
+
+## 0.3.2
 
 - **Cars that handle like real ones** (engine 2026.11.9; [docs/engine.md](docs/engine.md#how-the-car-handles)): N3,
   N2 and N1 cars are a physical model. Tyre forces come from slip at both axles; the body has yaw inertia; load moves

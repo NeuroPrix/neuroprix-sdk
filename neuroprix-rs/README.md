@@ -21,7 +21,7 @@ finds the two engines the same. Otherwise it says why and trains on the Python e
 
 Everything training uses: the seeded Grand Prix circuit generator (with N1's hills and banks), building a track (the
 track map, heights, banks, corner speeds, the grid), and a field of training cars stepped as `neuroprix.env.SimEnv`
-steps them (the tyre model, walls, rocks and oil, car contacts, slipstream, battery and boost, hills, the rays, the
+steps them (the tyre model, walls, car contacts, slipstream, battery and boost, hills, the rays, the
 radar, and N1's tilt and sight lines). Races on the NeuroPrix server (pit stops, the safety car) run the Python engine.
 `neuroprix.rust_env.RustEnv` is the trainer's interface to it, the same as `SimEnv`.
 

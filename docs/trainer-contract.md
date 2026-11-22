@@ -17,12 +17,12 @@ A trainer is any program the runner can start. The runner prepares each session 
   "driver": "Dex Jango",
   "class": "n2",
   "settings": {"updates": 400, "batch": 8, "eval_every": 10, "traffic": 4, "random_tracks": true, "damage": -90.0},
-  "tracks": [{"name": "My first gym", "control": [[120, 300], [164, 200], ...], "width": 90, "grip": 1, "laps": 2, "obstacles": []}],
+  "tracks": [{"name": "My first gym", "control": [[120, 300], [164, 200], ...], "width": 90, "grip": 1, "laps": 2}],
   "start_brain": "/tmp/neuroprix-xxxx/start.json",
   "start_weights": null,
   "brain_out": "/tmp/neuroprix-xxxx/brain.json",
   "workers": 6,
-  "engine_version": "2026.11.9"
+  "engine_version": "2026.11.10"
 }
 ```
 

@@ -25,21 +25,12 @@ pub const GRID_SLOTS: usize = 16;
 
 pub type P = [f64; 2];
 
-#[derive(Clone)]
-pub struct Obstacle {
-    pub oil: bool,
-    pub x: f64,
-    pub y: f64,
-    pub r: f64,
-}
-
 /// A generated circuit (every number integral except grip, elev and bank, as the Python engine makes them).
 pub struct Spec {
     pub seed: i64,
     pub width: f64,
     pub grip: f64,
     pub control: Vec<P>,
-    pub obstacles: Vec<Obstacle>,
     pub elev: Option<Vec<f64>>,
     pub bank: Option<Vec<f64>>,
 }
@@ -429,58 +420,11 @@ pub fn generate_flat(seed: i64) -> Spec {
             .collect()
     });
     let grip = js_round((0.85 + rng.next() * 0.3) * 100.0) / 100.0;
-    let pts = smooth_closed(&control);
-    let (s_, l) = cumulative(&pts);
-    let mut obstacles = Vec::new();
-    let mut used: Vec<f64> = Vec::new();
-    let n_rocks = 2 + (rng.next() * 6.0).floor() as i64;
-    let n_oil = (rng.next() * 4.0).floor() as i64;
-    let mut pick_t = |rng: &mut Mulberry32| -> Option<f64> {
-        for _ in 0..30 {
-            let t = 0.06 + rng.next() * 0.9;
-            if used.iter().all(|u| (u - t).abs() > 0.03) {
-                used.push(t);
-                return Some(t);
-            }
-        }
-        None
-    };
-    for _ in 0..n_rocks {
-        let t = match pick_t(&mut rng) {
-            Some(t) => t,
-            None => break,
-        };
-        let (x, y, nx, ny) = point_at(&pts, &s_, l, t * l);
-        let side = if rng.next() < 0.5 { -1.0 } else { 1.0 };
-        let off = side * width * (0.12 + rng.next() * 0.22);
-        let r = js_round(7.0 + rng.next() * 6.0);
-        obstacles.push(Obstacle {
-            oil: false,
-            x: js_round(x + nx * off),
-            y: js_round(y + ny * off),
-            r,
-        });
-    }
-    for _ in 0..n_oil {
-        let t = match pick_t(&mut rng) {
-            Some(t) => t,
-            None => break,
-        };
-        let (x, y, nx, ny) = point_at(&pts, &s_, l, t * l);
-        let off = (rng.next() - 0.5) * width * 0.3;
-        obstacles.push(Obstacle {
-            oil: true,
-            x: js_round(x + nx * off),
-            y: js_round(y + ny * off),
-            r: js_round(18.0 + rng.next() * 10.0),
-        });
-    }
     Spec {
         seed,
         width,
         grip,
         control,
-        obstacles,
         elev: None,
         bank: None,
     }
@@ -573,7 +517,6 @@ pub struct Track {
     pub width: f64,
     pub grip: f64,
     pub laps: i64,
-    pub oils: Vec<Obstacle>,
     pub mask: Vec<u8>,
     pub start: (f64, f64, f64),
     pub hilly: bool,
@@ -594,7 +537,7 @@ pub fn bank_fade(k: f64) -> f64 {
 
 impl Track {
     /// The engine's build_track, from a spec already read as build_track reads it (world size, clamped control
-    /// points, width, grip, laps, rocks, oil, heights and banks: neuroprix's adapter reads them with the engine's own code).
+    /// points, width, grip, laps, heights and banks: neuroprix's adapter reads them with the engine's own code).
     #[allow(clippy::too_many_arguments)]
     pub fn build(
         w: usize,
@@ -603,8 +546,6 @@ impl Track {
         width: f64,
         grip: f64,
         laps: i64,
-        rocks: Vec<Obstacle>,
-        oils: Vec<Obstacle>,
         elev: Vec<f64>,
         bank_deg: Vec<f64>,
     ) -> Track {
@@ -648,26 +589,6 @@ impl Track {
                 }
             }
         }
-        for r in &rocks {
-            let (rx, ry, rr) = (r.x, r.y, r.r);
-            let x0 = max(0.0, rx - rr - 1.0) as i64;
-            let x1 = min(wf, rx + rr + 2.0) as i64;
-            let y0 = max(0.0, ry - rr - 1.0) as i64;
-            let y1 = min(hf, ry + rr + 2.0) as i64;
-            if x0 >= x1 || y0 >= y1 {
-                continue;
-            }
-            for yi in y0..y1 {
-                let gy = yi as f64 + 0.5;
-                for xi in x0..x1 {
-                    let gx = xi as f64 + 0.5;
-                    let (dx, dy) = (gx - rx, gy - ry);
-                    if !(dx * dx + dy * dy > rr * rr) {
-                        mask[yi as usize * w + xi as usize] = 0;
-                    }
-                }
-            }
-        }
         let start = (
             pts[0][0],
             pts[0][1],
@@ -682,7 +603,6 @@ impl Track {
             width,
             grip,
             laps,
-            oils,
             mask,
             start,
             hilly: false,

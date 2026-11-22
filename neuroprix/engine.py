@@ -24,17 +24,17 @@ import numpy as np
 # The engine's version: bump it whenever the physics, the circuits or what drivers sense changes (the same number is in
 # game/index.html as ENGINE_VERSION). Runners report theirs, and the Train page flags a runner whose engine is out of date
 # (it would be training on different physics than the races use).
-ENGINE_VERSION = "2026.11.9"   # (2026.11.9: N3, N2 and N1 cars handle like real ones; proportional controls)
+ENGINE_VERSION = "2026.11.10"   # (2026.11.10: no stones or oil slicks; 2026.11.9: cars handle like real ones)
 
 W, H = 900, 600                # default world (training gyms); Grand Prix circuits carry their own "size"
 MAX_SPEED, ACCEL, TURN_DRAG, TURN_RATE, MIN_SPEED = 5.0, 0.12, 0.975, 0.055, 1.2
 CAR_L, CAR_W, RAY_LEN, ACTION_REPEAT = 18, 10, 250, 4
 FPS = 60                       # physics frames per second
-WRONG_WAY_PX, OIL_GRIP = 120, 0.35
+WRONG_WAY_PX = 120
 # What a car senses (brain kinds 16-19, docs/observations-and-actions.md): only what a real car could measure, and the heading. A
 # fan of 9 rays, the side ones at -90 and +90 degrees and seven across the front; the 0 and +-20 degree ones are BEAMS
 # the car's width (three parallel rays, from the nose's centre and half the car's width to either side, the shortest
-# reading counting), so a rock just off the nose's line is seen.
+# reading counting), so a wall just off the nose's line is seen.
 BEAM_HALF = CAR_W / 2
 FAN_ANGLES = [math.radians(d) for d in (-90, -60, -40, -20, 0, 20, 40, 60, 90)]
 FAN_BEAMS = (3, 4, 5)
@@ -78,7 +78,7 @@ def health_speed(health: float) -> float:
 
 EMPTY_SECTOR = [0, 0, 0.5, 0.5]
 CONTACT_SLOWDOWN = 0.5
-# damage (every tier): walls, rocks and other cars cost health instead of ending the race (see PHYS in the browser)
+# damage (every tier): walls and other cars cost health instead of ending the race (see PHYS in the browser)
 WALL_DAMAGE, CAR_DAMAGE, BOUNCE_KEEP, DEFLECT, STALL_FRAMES = 1.3, 0.5, 0.45, 0.5, 600   # head-on at top speed: a total loss
 SPIN_K, BOUNCE_BACK, STUN_FRAMES = 1.2, 0.3, 30   # a hit spins the car (radians at a square-on top-speed hit), bounces its
                                                   # motion off the wall, and stuns the controls (frames)
@@ -505,85 +505,8 @@ def _generate_flat(seed: int) -> dict:
         control = [[js_round(SW / 2 + math.cos(i / 16 * math.pi * 2) * 1700), js_round(SH / 2 + math.sin(i / 16 * math.pi * 2) * 1000)]
                    for i in range(16)]
     grip = js_round((0.85 + rng() * 0.3) * 100) / 100
-    pts = smooth_closed(control)
-    S, L = cumulative(pts)
-    obstacles, used = [], []
-    n_rocks = 2 + math.floor(rng() * 6)
-    n_oil = math.floor(rng() * 4)
-
-    def pick_t():
-        for _ in range(30):
-            t = 0.06 + rng() * 0.9
-            if all(abs(u - t) > 0.03 for u in used):
-                used.append(t)
-                return t
-        return None
-    for _ in range(n_rocks):
-        t = pick_t()
-        if t is None:
-            break
-        x, y, nx, ny = point_at(pts, S, L, t * L)
-        side = -1 if rng() < 0.5 else 1
-        off, r = side * width * (0.12 + rng() * 0.22), js_round(7 + rng() * 6)
-        obstacles.append({"type": "rock", "x": js_round(x + nx * off), "y": js_round(y + ny * off), "r": r})
-    for _ in range(n_oil):
-        t = pick_t()
-        if t is None:
-            break
-        x, y, nx, ny = point_at(pts, S, L, t * L)
-        off = (rng() - 0.5) * width * 0.3
-        obstacles.append({"type": "oil", "x": js_round(x + nx * off), "y": js_round(y + ny * off), "r": js_round(18 + rng() * 10)})
     return {"name": f"Procedural #{seed}", "seed": seed, "size": [SW, SH], "control": control, "width": width,
-            "grip": grip, "laps": 2, "obstacles": obstacles}
-
-
-OBSTACLE_MAX = 3.0                 # density: 0 = none, 1 = the circuit's own, up to 3x
-ROCK_MEAN, OIL_MEAN = 4.5, 1.5     # a circuit's average number of each (2-7 rocks, 0-3 slicks)
-OBSTACLE_GAP = 120                 # extra obstacles keep at least this far from every other one
-
-
-def set_obstacle_density(spec: dict, stones: float = 1.0, oil: float = 1.0) -> dict:
-    """A circuit with more or fewer stones and oil slicks than its track number gives it. 0 removes them all (a clean
-    track), 1 keeps the circuit as it is, more adds extra ones (up to OBSTACLE_MAX times; a circuit that has few gets
-    at least the average number times the density). Fewer keeps the first ones; extra ones are placed like the
-    originals, from their own random sequence, so the same track number and densities always give the same circuit.
-    Mirrors setObstacleDensity in the browser."""
-    stones = min(OBSTACLE_MAX, max(0.0, float(stones)))
-    oil = min(OBSTACLE_MAX, max(0.0, float(oil)))
-    if stones == 1 and oil == 1:
-        return spec
-    rocks = [o for o in spec.get("obstacles", []) if o.get("type") != "oil"]
-    oils = [o for o in spec.get("obstacles", []) if o.get("type") == "oil"]
-
-    def target(have, k, mean):
-        return js_round(k * (have if k <= 1 else max(have, mean)))
-    want_r, want_o = target(len(rocks), stones, ROCK_MEAN), target(len(oils), oil, OIL_MEAN)
-    rocks, oils = rocks[:want_r], oils[:want_o]
-    pts = smooth_closed(spec["control"])
-    S, L = cumulative(pts)
-    width = spec["width"]
-    rng = mulberry32(float(spec.get("seed", 0)) * 2654435761.0 + 7.0)
-
-    def free(x, y):
-        return all(math.hypot(o["x"] - x, o["y"] - y) >= OBSTACLE_GAP for o in rocks + oils)
-    tries = 0
-    while len(rocks) < want_r and tries < 600:
-        tries += 1
-        x, y, nx, ny = point_at(pts, S, L, (0.06 + rng() * 0.88) * L)
-        side = -1 if rng() < 0.5 else 1
-        off, r = side * width * (0.12 + rng() * 0.22), js_round(7 + rng() * 6)
-        o = {"type": "rock", "x": js_round(x + nx * off), "y": js_round(y + ny * off), "r": r}
-        if free(o["x"], o["y"]):
-            rocks.append(o)
-    tries = 0
-    while len(oils) < want_o and tries < 600:
-        tries += 1
-        x, y, nx, ny = point_at(pts, S, L, (0.06 + rng() * 0.88) * L)
-        off = (rng() - 0.5) * width * 0.3
-        o = {"type": "oil", "x": js_round(x + nx * off), "y": js_round(y + ny * off), "r": js_round(18 + rng() * 10)}
-        if free(o["x"], o["y"]):
-            oils.append(o)
-    return {**spec, "obstacles": rocks + oils, "stones": stones, "oil": oil}
+            "grip": grip, "laps": 2}
 
 
 # ---------- track ----------
@@ -596,8 +519,6 @@ class Track:
     width: float
     grip: float
     laps: int
-    rocks: list
-    oils: list
     mask: np.ndarray            # [H, W] bool: drivable
     start: tuple                # x, y, angle
     W: int = 900
@@ -626,24 +547,22 @@ def world_size(spec: dict) -> tuple:
 
 
 def read_spec(spec: dict) -> tuple:
-    """A track spec as build_track reads it: world size, control points, width, grip, laps, rocks, oil slicks, and a
+    """A track spec as build_track reads it: world size, control points, width, grip, laps, and a
     height and bank per control point (the optional Rust engine reads specs with this too)."""
     W, H = world_size(spec)
     control = [[max(0.0, min(W, float(p[0]))), max(0.0, min(H, float(p[1])))] for p in spec["control"]]
     width = max(30.0, min(160.0, float(spec.get("width") or 80)))
     grip = max(0.3, min(2.0, float(spec.get("grip") or 1)))
     laps = max(1, min(LAPS_MAX, int(round(float(spec.get("laps") or 2)))))
-    rocks = [o for o in spec.get("obstacles", []) if o.get("type") != "oil"]
-    oils = [o for o in spec.get("obstacles", []) if o.get("type") == "oil"]
-    return W, H, control, width, grip, laps, rocks, oils, spec_values(spec, "elev", ELEV_MAX), spec_values(spec, "bank", BANK_MAX)
+    return W, H, control, width, grip, laps, spec_values(spec, "elev", ELEV_MAX), spec_values(spec, "bank", BANK_MAX)
 
 
 def build_track(spec: dict) -> Track:
-    W, H, control, width, grip, laps, rocks, oils, elev, bank = read_spec(spec)
+    W, H, control, width, grip, laps, elev, bank = read_spec(spec)
     pts = smooth_closed(control)
     S, L = cumulative(pts)
     # Drivable = pixel centre within width/2 of the centreline (the browser strokes it with round
-    # joins and caps), minus the rocks. Only the pixels near each segment are checked.
+    # joins and caps). Only the pixels near each segment are checked.
     half = width / 2
     xs, ys = np.arange(W) + 0.5, np.arange(H) + 0.5
     mask = np.zeros((H, W), dtype=bool)
@@ -661,16 +580,8 @@ def build_track(spec: dict) -> Track:
         t = np.clip(((gx - ax) * vx + (gy - ay) * vy) / l2, 0, 1)
         d2 = (ax + vx * t - gx) ** 2 + (ay + vy * t - gy) ** 2
         mask[y0:y1, x0:x1] |= d2 <= half * half
-    for r in rocks:
-        rx, ry, rr = float(r["x"]), float(r["y"]), float(r["r"])
-        x0, x1 = int(max(0, rx - rr - 1)), int(min(W, rx + rr + 2))
-        y0, y1 = int(max(0, ry - rr - 1)), int(min(H, ry + rr + 2))
-        if x0 >= x1 or y0 >= y1:
-            continue
-        gx, gy = np.meshgrid(xs[x0:x1], ys[y0:y1])
-        mask[y0:y1, x0:x1] &= (gx - rx) ** 2 + (gy - ry) ** 2 > rr * rr
     start = (pts[0][0], pts[0][1], math.atan2(pts[1][1] - pts[0][1], pts[1][0] - pts[0][0]))
-    T = Track(spec=spec, pts=pts, S=S, L=L, width=width, grip=grip, laps=laps, rocks=rocks, oils=oils, mask=mask, start=start, W=W, H=H)
+    T = Track(spec=spec, pts=pts, S=S, L=L, width=width, grip=grip, laps=laps, mask=mask, start=start, W=W, H=H)
     if any(elev) or any(bank):   # N1: the road's heights and banks
         T.hilly, T.z = True, smooth_values(control, elev)
         T.grade, T.vcurv, T.bank = road_shape(pts, S, L, T.z, smooth_values(control, bank))
@@ -949,8 +860,8 @@ GRID_SLOTS = 16
 
 
 def free_grid(T) -> list:
-    """The race grid: the first GRID_SLOTS slots whose whole car outline is on clear track (a rock on the grid
-    takes a slot out). Same rule as freeGrid in the browser."""
+    """The race grid: the first GRID_SLOTS slots whose whole car outline is on clear track. Same rule as freeGrid in
+    the browser."""
     cached = getattr(T, "_grid", None)
     if cached is not None:
         return cached
@@ -1019,7 +930,7 @@ class Car:
     impact_risk: float = 0.0
     touched: dict | None = None   # (a dict: kept in the order the touches happened, as in the browser)
     world_cap: float = 1.0   # the practice top speed (learner's permit; 1 = off)
-    fragile: bool = False    # first lessons: any wall or rock ends the run
+    fragile: bool = False    # first lessons: any wall ends the run
     wrong_way_px: float = WRONG_WAY_PX   # training only: how far back it may go before it's out (spun-start practice)
     # pit stops (races only): called in by its coach; in the lane (1 to the box, 2 at the box, 3 leaving)
     pit_call: bool = False
@@ -1228,8 +1139,7 @@ class Car:
         if stunned:
             self.stun -= 1
         T, ox, oy, oa = self.track, self.x, self.y, self.angle
-        on_oil = any((self.x - o["x"]) ** 2 + (self.y - o["y"]) ** 2 < o["r"] ** 2 for o in T.oils)
-        grip = T.grip * self.grip_k * (OIL_GRIP if on_oil else 1)
+        grip = T.grip * self.grip_k
         top = self.top_speed()
         hill = T.hilly and has_pedals(self.gen)
         if hill:   # N1: the slope under the car (along its direction of travel), and the tyres' load over crests and dips
@@ -1492,7 +1402,7 @@ class Car:
         return 0.0 if need == math.inf else max(0.0, self.speed / need - 1)
 
     def off_corner(self, c: float, s: float):
-        hl, hw = CAR_L / 2, CAR_W / 2   # four corners, then the middle of each side (no rock slips between)
+        hl, hw = CAR_L / 2, CAR_W / 2   # four corners, then the middle of each side
         for lx, ly in ((hl, hw), (hl, -hw), (-hl, hw), (-hl, -hw), (hl, 0), (-hl, 0), (0, hw), (0, -hw)):
             px, py = self.x + lx * c - ly * s, self.y + lx * s + ly * c
             if not self.track.on_track(px, py):
@@ -1507,9 +1417,9 @@ class Car:
             self.dead, self.reason = True, "wrecked"
 
     def bounce(self, hit, ox: float, oy: float, oa: float) -> None:
-        """A corner went into a wall or rock: back to where we were, lose speed and health, nose along the wall."""
+        """A corner went into a wall: back to where we were, lose speed and health, nose along the wall."""
         T, (px, py) = self.track, hit
-        if self.fragile:   # training only ("first lessons"): any wall or rock ends the run
+        if self.fragile:   # training only ("first lessons"): any wall ends the run
             self.x, self.y, self.angle = ox, oy, oa
             self.hits += 1
             self.health, self.dead, self.reason = 0.0, True, "crashed"

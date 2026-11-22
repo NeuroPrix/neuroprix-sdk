@@ -53,7 +53,7 @@ Check it worked:
 ~/neuroprix/bin/neuroprix-runner --version
 ```
 
-It prints something like `neuroprix-runner 0.3.2 (engine 2026.11.9)`.
+It prints something like `neuroprix-runner 0.3.3 (engine 2026.11.10)`.
 
 ### 2. Start the runner and link it to your account
 
@@ -200,7 +200,7 @@ neuroprix-runner [--server URL] [--name NAME] [--workers N] [--engine python|rus
 ### What the runner prints
 
 ```
-22:41:07 NeuroPrix Runner 0.3.2: "my-pc" on https://neuroprix.com/api, 6 games in parallel, trainer: NeuroPrix PPO. Waiting for training sessions (Ctrl+C to quit).
+22:41:07 NeuroPrix Runner 0.3.3: "my-pc" on https://neuroprix.com/api, 6 games in parallel, trainer: NeuroPrix PPO. Waiting for training sessions (Ctrl+C to quit).
 22:43:15 training Dex Jango (N2), session a6480de05a
 22:44:02   update 25
 22:44:51   update 50

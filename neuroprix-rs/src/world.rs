@@ -16,7 +16,6 @@ const RAY_LEN: f64 = 250.0;
 pub const ACTION_REPEAT: usize = 4;
 const FPS: f64 = 60.0;
 pub const WRONG_WAY_PX: f64 = 120.0;
-const OIL_GRIP: f64 = 0.35;
 const BEAM_HALF: f64 = CAR_W / 2.0;
 const FAN_DEG: [f64; 9] = [-90.0, -60.0, -40.0, -20.0, 0.0, 20.0, 40.0, 60.0, 90.0];
 const YAW_FULL: f64 = 3.0;
@@ -819,11 +818,7 @@ impl Car {
             self.stun -= 1;
         }
         let (ox, oy, oa) = (self.x, self.y, self.angle);
-        let on_oil = t
-            .oils
-            .iter()
-            .any(|o| pow2(self.x - o.x) + pow2(self.y - o.y) < pow2(o.r));
-        let mut grip = t.grip * self.grip_k * (if on_oil { OIL_GRIP } else { 1.0 });
+        let mut grip = t.grip * self.grip_k;
         let mut top = self.top_speed();
         let hill = t.hilly && has_pedals(self.gen);
         let (mut ge, mut traction, mut k) = (0.0f64, 1.0f64, self.seg);

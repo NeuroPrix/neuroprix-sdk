@@ -53,10 +53,9 @@ class RustEnv(SimEnv):
         return self._ne.generate_track_spec(int(seed), cls)
 
     def _new_track(self, spec: dict):
-        W, H, control, width, grip, laps, rocks, oils, elev, bank = sim.read_spec(spec)
-        ob = [[(float(o["x"]), float(o["y"]), float(o["r"])) for o in group] for group in (rocks, oils)]
+        W, H, control, width, grip, laps, elev, bank = sim.read_spec(spec)
         return _Track(self._ne.RustTrack(W, H, [(float(p[0]), float(p[1])) for p in control], width, grip, laps,
-                                         ob[0], ob[1], elev, bank), spec)
+                                         elev, bank), spec)
 
     def setup_world(self, spec: dict, cars: int = 1, random_start: bool = False, tier: str = "n3", speed_cap: float = 1.0,
                     fragile: bool = False, caps: list[float] | None = None, gen: int | None = None,

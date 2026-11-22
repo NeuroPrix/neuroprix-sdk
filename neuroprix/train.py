@@ -55,11 +55,11 @@ R_FAST = 0.5           # going fast (speed >= FAST_THRESHOLD) while making progr
 FAST_THRESHOLD = 0.8
 R_IDLE = -1.0          # no new forward progress this step (never launched, coasting, or waiting)
 R_DEAD = -30.0         # wrecked, stalled or went the wrong way
-R_DAMAGE = -40.0       # per unit of health lost. Walls, rocks and other cars no longer end the race; they cost health
+R_DAMAGE = -40.0       # per unit of health lost. Walls and other cars no longer end the race; they cost health
                        # by how hard the hit was (a head-on hit at top speed loses 0.7, a glancing scrape a few hundredths)
 R_FINISH = 10.0        # completed all laps
 R_CONTACT = -6.0       # touched another car (each new touch)
-R_WALL = 0.0           # per physics frame spent touching a wall or rock, however gently (set per session; see training settings)
+R_WALL = 0.0           # per physics frame spent touching a wall, however gently (set per session; see training settings)
 R_OVERTAKE = 15.0      # a clean pass: moving ahead of a nearby car without touching it in the last 2 s. Losing a
                        # place costs the same, so swapping places back and forth with its own copies never pays.
 PASS_CLEAN_STEPS = 30  # "clean": no touch between the two cars in this many decisions (2 s)
@@ -659,7 +659,7 @@ def _drive(env, model, gen, tier, spec, cars, max_steps, record=None, others=Non
                     o = others[k - 1]
                     o["path"].append(_pose(states[k], acts[k]))
                     o["finished"], o["reason"] = states[k]["finished"], states[k]["reason"] or ""
-    info["walls"] = walls   # (frames car 0 spent touching a wall or rock)
+    info["walls"] = walls   # (frames car 0 spent touching a wall)
     return states[0], info, touches, steps
 
 
@@ -825,7 +825,7 @@ def main() -> None:
                          "tried again; 1 = off, the default: in a test it pushed a braking driver back to lifting off). Steering is untouched")
     ap.add_argument("--first-lessons", type=int, default=0,
                     help="practice updates where any wall hit ends the run (as cars used to), before the real damage rules")
-    ap.add_argument("--wall", type=float, default=R_WALL, help="reward per physics frame touching a wall or rock (scraping)")
+    ap.add_argument("--wall", type=float, default=R_WALL, help="reward per physics frame touching a wall (scraping)")
     ap.add_argument("--steer-flip", type=float, default=R_STEER_FLIP, help="reward for reversing the steering (left <-> right) between decisions")
     ap.add_argument("--critic-warmup", type=int, default=None, help="updates that train only the critic (default 10 when resuming)")
     ap.add_argument("--backwards", type=float, default=0.0, help="experiments: a price on ground lost, this x the progress "
