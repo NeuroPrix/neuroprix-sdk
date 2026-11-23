@@ -41,7 +41,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-VERSION = "0.3.3"
+VERSION = "0.3.4"
 CONFIG = Path(os.environ.get("NEUROPRIX_RUNNER_CONFIG") or Path.home() / ".neuroprix" / "runner.json")
 SESSION_FORMAT = 1
 
@@ -161,6 +161,46 @@ class ServerError(Exception):
     def __init__(self, status: int, detail: str):
         super().__init__(f"{status}: {detail}")
         self.status, self.detail = status, detail
+
+
+# What the trainer prints goes to the server in reports of at most REPORT_LINES lines and REPORT_BYTES bytes (the
+# server takes 8 MB; behind AWS Lambda, 6), each line cut to LINE_MAX characters (what the server keeps of one).
+REPORT_LINES, REPORT_BYTES, LINE_MAX = 1500, 3_000_000, 200_000
+
+
+def lighten_checks(pending: list[str]) -> None:
+    """Of the checks waiting to be sent, the server keeps only the newest one's replay (its path and preview: the Train
+    page's test lap): drop them from the ones before it, keeping their results. A fast trainer checks every second
+    or so, each replay 100-200 KB, and a backlog of them (the server slow to answer once) would otherwise make every
+    report too big to send."""
+    newest = None
+    for i in range(len(pending) - 1, -1, -1):
+        ln = pending[i]
+        if not ln.startswith('{"event": "eval"'):
+            continue
+        if newest is None:
+            newest = i
+            continue
+        if '"path"' not in ln and '"preview"' not in ln:
+            break   # (lightened already: so is every check before it)
+        try:
+            ev = json.loads(ln)
+        except ValueError:
+            continue
+        ev.pop("path", None)
+        ev.pop("preview", None)
+        pending[i] = json.dumps(ev)
+
+
+def report_size(pending: list[str], max_bytes: int = REPORT_BYTES, max_lines: int = REPORT_LINES) -> int:
+    """How many of the pending lines go in the next report: as many as fit in max_bytes (and max_lines), at least one."""
+    n = size = 0
+    for ln in pending[:max_lines]:
+        size += len(json.dumps(ln)) + 2
+        if n and size > max_bytes:
+            break
+        n += 1
+    return n
 
 
 class Api:
@@ -317,9 +357,10 @@ def run_job(api: Api, job: dict, workers: int, trainer: list[str]) -> None:
 
         pending, tail, finished_reading, stopping = [], [], False, False
         last_post, last_ok, sent_mtime = 0.0, time.time(), 0.0
+        budget = REPORT_BYTES   # (a report's size: halved after one is refused as too big, back up as they go through)
         while True:
             try:   # gather what the trainer printed
-                while len(pending) < 1500:
+                while len(pending) < REPORT_LINES:
                     item = lines.get(timeout=0.2)
                     if item is None:
                         finished_reading = True
@@ -328,7 +369,9 @@ def run_job(api: Api, job: dict, workers: int, trainer: list[str]) -> None:
                         nets = [i for i, ln in enumerate(pending) if ln.startswith('{"event": "net"')]
                         if len(nets) >= 2:
                             del pending[nets[0]]
-                    pending.append(item)
+                    pending.append(item[:LINE_MAX])
+                    if item.startswith('{"event": "eval"'):
+                        lighten_checks(pending)
                     if item.startswith("{"):
                         try:
                             ev = json.loads(item)
@@ -348,10 +391,12 @@ def run_job(api: Api, job: dict, workers: int, trainer: list[str]) -> None:
             if m and m != sent_mtime and send_brain(api, jid, brain_out):
                 sent_mtime = m
             now = time.time()
-            if pending and (now - last_post > 5.0 or len(pending) >= 1500 or finished_reading) or now - last_post > 10:
+            if pending and (now - last_post > 5.0 or len(pending) >= REPORT_LINES or finished_reading) or now - last_post > 10:
                 try:
-                    r = api.call("POST", f"/runner/jobs/{jid}/report", {"lines": pending[:1500]})
-                    pending, last_post, last_ok = pending[1500:], now, now
+                    n = report_size(pending, budget)
+                    r = api.call("POST", f"/runner/jobs/{jid}/report", {"lines": pending[:n]})
+                    pending, last_post, last_ok = pending[n:], now, now
+                    budget = min(REPORT_BYTES, budget * 2)
                     if r.get("stop") and not stopping:
                         stopping = True
                         say("  stopped from the Train page" + (" (keeping the best version so far)" if r.get("keep") else ""))
@@ -361,6 +406,8 @@ def run_job(api: Api, job: dict, workers: int, trainer: list[str]) -> None:
                         say(f"  the server dropped this session ({e.detail}); stopping it")
                         stop_tree(proc)
                         return
+                    if e.status == 413:   # (too big for something between here and the server: smaller reports)
+                        budget = max(50_000, budget // 2)
                     last_post = now
                 except OSError as e:   # no connection: keep the lines and try again
                     last_post = now

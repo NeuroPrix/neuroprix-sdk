@@ -5,6 +5,18 @@ version may need you to change your own trainer; minor and patch versions don't.
 (`neuroprix.ENGINE_VERSION`, e.g. `2026.11.2`), shown by `neuroprix-runner --version`; when it changes, update the SDK
 so you train on the same physics the races use.
 
+## 0.3.4
+
+- **The runner's reports always get through** (`neuroprix-runner`): a fast trainer (many workers, the Rust engine)
+  checks its driver every second or so, and each check's line carries its test lap's replay (100-200 KB). After one
+  report didn't go through, the backlog grew until every report was bigger than the server takes; it refused them,
+  the runner took that for a lost connection and sent the same report again, and the session failed. Now the checks
+  still waiting to be sent keep only their results (the server only ever shows the newest one's replay), a report
+  holds at most 3 MB, and one refused as too big makes the next ones smaller. Update the runner: `pip install -U
+  neuroprix`.
+- The default trainer has an experimental `--slide` reward (off by default): a cost per decision for sliding more
+  than 15 degrees off the nose.
+
 ## 0.3.3
 
 - **No stones or oil slicks** (engine 2026.11.10): every track is clean. Circuits have no rocks or oil any more, gyms

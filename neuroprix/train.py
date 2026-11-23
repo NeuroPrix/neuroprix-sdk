@@ -82,8 +82,20 @@ DEFAULT_REWARDS = {"progress": R_PROGRESS, "alive": R_ALIVE, "fast": R_FAST, "fa
                    "idle": R_IDLE, "dead": R_DEAD, "damage": R_DAMAGE, "finish": R_FINISH, "contact": R_CONTACT,
                    "steer_flip": R_STEER_FLIP, "wall": R_WALL, "overtake": R_OVERTAKE,
                    "corner": R_CORNER, "lose_place": R_LOSE_PLACE, "crash": R_CRASH, "risk": R_RISK, "turnround": 0.0,
-                   "backwards": 0.0, "stand_wrong": 0.0}
-# (turnround: experiments only, off by default and not a session setting: docs/observations-and-actions.md)
+                   "backwards": 0.0, "stand_wrong": 0.0, "slide": 0.0}
+# (turnround: experiments only, off by default and not a session setting: docs/observations-and-actions.md; slide:
+# the same, docs/observations-and-actions.md)
+SLIDE_FREE = 15 / 90   # the slide penalty's free share of the sideslip: sliding up to 15 degrees off the nose costs nothing
+
+
+def sideslip_of(st: dict) -> float:
+    """How far the car travels off where its nose points, 0 (along it) to 1 (90 degrees or more), read from its senses:
+    the sideslip input comes after the fan, the radar, speed, the wheel (cars with pedals) and the yaw rate."""
+    o = st.get("obs")
+    if not o or "sensors" not in st:
+        return 0.0
+    i = len(st["sensors"]) + sim.SECTORS * len(sim.EMPTY_SECTOR) + (3 if "braking" in st else 2)
+    return abs(o[i] - 0.5) * 2 if i < len(o) else 0.0
 
 
 def _idle_clock(steps_left: int, gamma: float, idle: float = R_IDLE) -> float:
@@ -104,6 +116,8 @@ def reward_for(prev: dict, cur: dict, rw: dict | None = None, steps_left: int = 
     if cur["dead"]:
         return r + rw["dead"] + _idle_clock(steps_left, gamma, rw["idle"])
     r += rw.get("corner", 0) * 10 * cur.get("corner_over", 0)   # arriving at a corner too fast to make it
+    if rw.get("slide"):   # experiments: sliding more than 15 degrees off the nose (a spin starts as a slide)
+        r += rw["slide"] * max(0.0, sideslip_of(cur) - SLIDE_FREE) / (1 - SLIDE_FREE)
     if rw.get("turnround") and "heading" in prev and "heading" in cur:   # experiments: a spun car turning back
         off0, off1 = abs(prev["heading"] - 0.5), abs(cur["heading"] - 0.5)   # (0 along the road, 0.5 backwards)
         if off0 > 30 / 360:   # pays for turning back towards the road's direction, costs the same for turning away
@@ -838,6 +852,8 @@ def main() -> None:
                     "before it's out for the wrong way, in practice (0: the races' 120 px)")
     ap.add_argument("--turnround", type=float, default=0.0, help="experiments: while more than 30 degrees off the road's "
                     "direction, this x 4 x how far the car turned back towards it (the same cost for turning away)")
+    ap.add_argument("--slide", type=float, default=0.0, help="experiments: per decision, this x how far the car slides "
+                    "past 15 degrees off its nose (1 at 90 degrees or more), e.g. -10; 0: off")
     ap.add_argument("--dead", type=float, default=R_DEAD, help="reward for being out (wrecked, stalled or wrong way)")
     ap.add_argument("--worker-timeout", type=float, default=900, help="seconds one update's games may take before the workers are restarted")
     ap.add_argument("--eval-every", type=int, default=10)
@@ -916,7 +932,8 @@ def main() -> None:
                "idle": args.idle, "dead": args.dead, "damage": args.damage, "finish": args.finish, "contact": args.contact,
                "steer_flip": args.steer_flip, "wall": args.wall, "overtake": args.overtake,
                "corner": args.corner, "lose_place": args.lose_place, "crash": args.crash, "risk": args.risk,
-               "turnround": args.turnround, "backwards": args.backwards, "stand_wrong": args.stand_wrong}
+               "turnround": args.turnround, "backwards": args.backwards, "stand_wrong": args.stand_wrong,
+               "slide": args.slide}
     changed = {k: v for k, v in rewards.items() if v != DEFAULT_REWARDS[k]}
     if changed:
         say(f"custom rewards: {changed}", event="note", message="custom rewards: " + ", ".join(f"{k} {v:g}" for k, v in changed.items()))

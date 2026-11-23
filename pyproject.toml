@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "neuroprix"
-version = "0.3.3"
+version = "0.3.4"
 description = "NeuroPrix SDK: train your NeuroPrix racing drivers on your own computer. The race engine, the default trainer and the runner."
 readme = "README.md"
 license = "Apache-2.0"
