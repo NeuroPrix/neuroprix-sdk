@@ -5,6 +5,14 @@ version may need you to change your own trainer; minor and patch versions don't.
 (`neuroprix.ENGINE_VERSION`, e.g. `2026.11.2`), shown by `neuroprix-runner --version`; when it changes, update the SDK
 so you train on the same physics the races use.
 
+## 0.3.6
+
+- **Every check's test lap reaches the Train page** (`neuroprix-runner`): a good driver's check drives a whole race,
+  and its line (the replay, with the senses and network the brain view shows) is 400-500 KB. The runner cut lines at
+  200 KB, which broke them, so the server dropped those test laps and the page only showed the ones where the car went
+  out early. A check now goes whole up to 1.5 MB; past that it drops its senses, then its network, then its replay,
+  never its result. Update the runner: `pip install -U neuroprix`.
+
 ## 0.3.5
 
 - **Two new training settings against spins**, both off by default: *Slide penalty* (`--slide`, a cost per decision for

@@ -41,7 +41,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-VERSION = "0.3.5"
+VERSION = "0.3.6"
 CONFIG = Path(os.environ.get("NEUROPRIX_RUNNER_CONFIG") or Path.home() / ".neuroprix" / "runner.json")
 SESSION_FORMAT = 1
 
@@ -164,8 +164,33 @@ class ServerError(Exception):
 
 
 # What the trainer prints goes to the server in reports of at most REPORT_LINES lines and REPORT_BYTES bytes (the
-# server takes 8 MB; behind AWS Lambda, 6), each line cut to LINE_MAX characters (what the server keeps of one).
-REPORT_LINES, REPORT_BYTES, LINE_MAX = 1500, 3_000_000, 200_000
+# server takes 8 MB; behind AWS Lambda, 6), each line cut to LINE_MAX characters (what the server keeps of one),
+# except a check's: a good driver's test lap, with its senses and network for the brain view, is 400-500 KB, and a cut
+# one isn't JSON any more, so the server would drop it. A check stays whole up to CHECK_MAX (as the server keeps it);
+# past that it loses its senses, then its network, then its replay, never its result.
+REPORT_LINES, REPORT_BYTES, LINE_MAX, CHECK_MAX = 1500, 3_000_000, 200_000, 1_500_000
+
+
+def fit_line(item: str) -> str:
+    """A line of the trainer's as it goes in a report: see LINE_MAX and CHECK_MAX."""
+    if len(item) <= LINE_MAX:
+        return item
+    if not item.startswith('{"event": "eval"'):
+        return item[:LINE_MAX]
+    if len(item) <= CHECK_MAX:
+        return item
+    try:
+        ev = json.loads(item)
+    except ValueError:
+        return item[:LINE_MAX]
+    pv = ev.get("preview") if isinstance(ev.get("preview"), dict) else {}
+    for drop in (lambda: pv.pop("senses", None), lambda: pv.pop("net", None),
+                 lambda: (ev.pop("path", None), ev.pop("preview", None))):
+        drop()
+        out = json.dumps(ev)
+        if len(out) <= CHECK_MAX:
+            return out
+    return out
 
 
 def lighten_checks(pending: list[str]) -> None:
@@ -369,7 +394,7 @@ def run_job(api: Api, job: dict, workers: int, trainer: list[str]) -> None:
                         nets = [i for i, ln in enumerate(pending) if ln.startswith('{"event": "net"')]
                         if len(nets) >= 2:
                             del pending[nets[0]]
-                    pending.append(item[:LINE_MAX])
+                    pending.append(fit_line(item))
                     if item.startswith('{"event": "eval"'):
                         lighten_checks(pending)
                     if item.startswith("{"):
