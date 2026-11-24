@@ -83,8 +83,8 @@ DEFAULT_REWARDS = {"progress": R_PROGRESS, "alive": R_ALIVE, "fast": R_FAST, "fa
                    "steer_flip": R_STEER_FLIP, "wall": R_WALL, "overtake": R_OVERTAKE,
                    "corner": R_CORNER, "lose_place": R_LOSE_PLACE, "crash": R_CRASH, "risk": R_RISK, "turnround": 0.0,
                    "backwards": 0.0, "stand_wrong": 0.0, "slide": 0.0}
-# (turnround: experiments only, off by default and not a session setting: docs/observations-and-actions.md; slide:
-# the same, docs/observations-and-actions.md)
+# (turnround and slide: off by default, and session settings since the 0.3.5 trainer; tested in
+# docs/observations-and-actions.md. backwards and stand_wrong: experiments only, not session settings)
 SLIDE_FREE = 15 / 90   # the slide penalty's free share of the sideslip: sliding up to 15 degrees off the nose costs nothing
 
 
@@ -116,9 +116,9 @@ def reward_for(prev: dict, cur: dict, rw: dict | None = None, steps_left: int = 
     if cur["dead"]:
         return r + rw["dead"] + _idle_clock(steps_left, gamma, rw["idle"])
     r += rw.get("corner", 0) * 10 * cur.get("corner_over", 0)   # arriving at a corner too fast to make it
-    if rw.get("slide"):   # experiments: sliding more than 15 degrees off the nose (a spin starts as a slide)
+    if rw.get("slide"):   # sliding more than 15 degrees off the nose (a spin starts as a slide)
         r += rw["slide"] * max(0.0, sideslip_of(cur) - SLIDE_FREE) / (1 - SLIDE_FREE)
-    if rw.get("turnround") and "heading" in prev and "heading" in cur:   # experiments: a spun car turning back
+    if rw.get("turnround") and "heading" in prev and "heading" in cur:   # a car turned off the road's direction turning back
         off0, off1 = abs(prev["heading"] - 0.5), abs(cur["heading"] - 0.5)   # (0 along the road, 0.5 backwards)
         if off0 > 30 / 360:   # pays for turning back towards the road's direction, costs the same for turning away
             r += rw["turnround"] * 4 * (off0 - off1)
@@ -734,8 +734,8 @@ def preview_drive(env, model, spec, cars, max_steps, record, preview, senses=Non
 # ---------- a runner's session (the trainer contract: see the SDK's docs/trainer-contract.md) ----------
 SESSION_NUMBERS = {"updates", "batch", "eval_every", "traffic", "max_steps", "epochs", "minibatch", "progress", "alive",
                    "fast", "fast_threshold", "idle", "dead", "damage", "finish", "contact", "steer_flip", "corner", "risk",
-                   "crash", "lose_place", "overtake", "wall", "lr", "entropy", "gamma", "lam", "clip", "start_margin",
-                   "check_tracks", "check_walls"}
+                   "crash", "lose_place", "overtake", "wall", "slide", "turnround", "lr", "entropy", "gamma", "lam", "clip",
+                   "start_margin", "check_tracks", "check_walls"}
 SESSION_SWITCHES = {"random_tracks", "one_way"}
 
 
@@ -850,9 +850,9 @@ def main() -> None:
                     "start turns round (0.5: about half)")
     ap.add_argument("--spun-room", type=float, default=0.0, help="experiments: how far back (px) a car started spun may go "
                     "before it's out for the wrong way, in practice (0: the races' 120 px)")
-    ap.add_argument("--turnround", type=float, default=0.0, help="experiments: while more than 30 degrees off the road's "
+    ap.add_argument("--turnround", type=float, default=0.0, help="while more than 30 degrees off the road's "
                     "direction, this x 4 x how far the car turned back towards it (the same cost for turning away)")
-    ap.add_argument("--slide", type=float, default=0.0, help="experiments: per decision, this x how far the car slides "
+    ap.add_argument("--slide", type=float, default=0.0, help="per decision, this x how far the car slides "
                     "past 15 degrees off its nose (1 at 90 degrees or more), e.g. -10; 0: off")
     ap.add_argument("--dead", type=float, default=R_DEAD, help="reward for being out (wrecked, stalled or wrong way)")
     ap.add_argument("--worker-timeout", type=float, default=900, help="seconds one update's games may take before the workers are restarted")

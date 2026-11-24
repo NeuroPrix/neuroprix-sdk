@@ -5,6 +5,14 @@ version may need you to change your own trainer; minor and patch versions don't.
 (`neuroprix.ENGINE_VERSION`, e.g. `2026.11.2`), shown by `neuroprix-runner --version`; when it changes, update the SDK
 so you train on the same physics the races use.
 
+## 0.3.5
+
+- **Two new training settings against spins**, both off by default: *Slide penalty* (`--slide`, a cost per decision for
+  sliding more than 15 degrees off the nose, all of it at 90 degrees) and *Turning back* (`--turnround`: while the car
+  points more than 30 degrees off the road's direction, a reward for turning back towards it and the same cost for
+  turning further off). The runner accepts them from a session and the default trainer applies them. Update the
+  runner to use them: `pip install -U neuroprix`; older runners refuse a session that sets them.
+
 ## 0.3.4
 
 - **The runner's reports always get through** (`neuroprix-runner`): a fast trainer (many workers, the Rust engine)

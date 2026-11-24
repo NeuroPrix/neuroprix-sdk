@@ -375,7 +375,7 @@ This writes the best brain to `experiment.json` (and `experiment.pth`, the same 
 | `--workers N` | Games in parallel | cores minus 2 (at most 8) |
 | `--engine python\|rust\|browser` | The race engine practice runs on: Python, the optional Rust one (same results, faster; [details](engine.md#the-optional-rust-engine-faster-training)), or the browser game | `python` |
 | `--progress-json` | Print progress as JSON lines (as the runner sees it) | text |
-| reward weights | `--progress`, `--fast`, `--damage`, `--crash`, `--corner`, `--overtake`, `--lose-place`, `--wall`, … | NeuroPrix's defaults |
+| reward weights | `--progress`, `--fast`, `--damage`, `--crash`, `--corner`, `--overtake`, `--lose-place`, `--wall`, `--slide`, `--turnround`, … | NeuroPrix's defaults |
 | learning | `--lr`, `--entropy`, `--gamma`, `--lam`, `--clip`, `--epochs`, `--minibatch` | NeuroPrix's defaults |
 
 The engine also works on its own in Python, for your own experiments:

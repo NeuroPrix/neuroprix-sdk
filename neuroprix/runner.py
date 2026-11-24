@@ -41,7 +41,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-VERSION = "0.3.4"
+VERSION = "0.3.5"
 CONFIG = Path(os.environ.get("NEUROPRIX_RUNNER_CONFIG") or Path.home() / ".neuroprix" / "runner.json")
 SESSION_FORMAT = 1
 
@@ -73,7 +73,7 @@ def default_trainer() -> list[str]:
 # The training settings a session may carry (the server sends them as trainer options; anything else is refused).
 NUMBER_SETTINGS = {"updates", "batch", "eval-every", "traffic", "max-steps", "epochs", "minibatch",
                    "progress", "alive", "fast", "fast-threshold", "idle", "dead", "damage", "finish", "contact",
-                   "steer-flip", "corner", "risk", "crash", "lose-place", "overtake", "wall", "start-margin", "check-tracks", "check-walls",
+                   "steer-flip", "corner", "risk", "crash", "lose-place", "overtake", "wall", "slide", "turnround", "start-margin", "check-tracks", "check-walls",
                    "lr", "entropy", "gamma", "lam", "clip"}
 INT_SETTINGS = {"updates", "batch", "eval-every", "traffic", "max-steps", "epochs", "minibatch", "check-tracks"}
 SWITCHES = {"random-tracks", "one-way"}
